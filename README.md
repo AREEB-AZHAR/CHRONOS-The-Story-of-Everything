@@ -63,10 +63,11 @@ bun install
 ```
 
 #### Step 3: Configure Environment Variables
-Verify or create a `.env` file in the root directory:
-```env
-DATABASE_URL="file:./db/custom.db"
+Copy `.env.example` to `.env`:
+```bash
+cp .env.example .env
 ```
+*(On Windows Command Prompt: `copy .env.example .env`)*
 
 #### Step 4: Generate Database Client (Prisma)
 ```bash

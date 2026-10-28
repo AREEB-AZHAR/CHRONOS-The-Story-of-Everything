@@ -1,7 +1,7 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# dependencies
-node_modules
+# Dependencies
+node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -10,45 +10,64 @@ node_modules
 !.yarn/releases
 !.yarn/versions
 
-# testing
-/coverage
+# Testing
+/coverage/
 
-# next.js
+# Next.js build output
 /.next/
 /out/
 
-# production
-/build
+# Production build
+/build/
 
-# misc
+# Operating System & IDE
 .DS_Store
+Thumbs.db
 *.pem
+.vscode/
+.idea/
 
-# debug
+# Debug & runtime logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+dev.log
+dev.out.log
+server.log
+*.pid
 
-# env files (can opt-in for committing if needed)
-.env*
+# Environment variables
+.env
+.env*.local
+.env.development
+.env.production
+!.env.example
 
-# vercel
-.vercel
+# Database & SQLite files
+db/*.db
+*.sqlite
+*.db
+*.db-journal
 
+# Vercel & Deployment
+.vercel/
 
-# typescript
+# TypeScript & tooling
 *.tsbuildinfo
 next-env.d.ts
 local-*
 .claude
 .z-ai-config
-*.log
-dev.log
-dev.out.log
 test
 prompt
-
-server.log
-# Skills directory
 /skills/
+
+# Legacy container & sandbox artifacts
+.zscripts/
+mini-services/
+tests/
+Caddyfile
+worklog.md
+examples/
