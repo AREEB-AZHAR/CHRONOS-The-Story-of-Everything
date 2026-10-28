@@ -50,8 +50,8 @@ To capture screenshots:
 
 #### Step 1: Clone or Open the Repository
 ```bash
-git clone <repository-url>
-cd "workspace-8047d47c-f286-45e3-8899-a830e71a094d 3d 2nd"
+git clone https://github.com/AREEB-AZHAR/CHRONOS-The-Story-of-Everything.git
+cd CHRONOS-The-Story-of-Everything
 ```
 
 #### Step 2: Install Dependencies
@@ -137,3 +137,4 @@ npm run start
 # or
 node .next/standalone/server.js
 ```
+
