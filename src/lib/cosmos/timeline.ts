@@ -328,7 +328,7 @@ export const EPOCHS: Epoch[] = [
     era: "STONE AGE",
     kind: "human",
     yearsAgo: 70_000,
-    image: "/cosmos/humans.webp",
+    image: "/cosmos/journeys.webp",
     accent: ACCENTS.human,
     body: "Humans painted the first art in caves, crossed to Australia by boat 50,000 years ago, and walked into the Americas across Beringia. As the last ice age ended, an extraordinary idea took root: instead of chasing food, grow it. Agriculture fed villages, villages became cities, and for the first time a species began changing the planet on purpose.",
     facts: [

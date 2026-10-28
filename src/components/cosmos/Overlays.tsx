@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import { EPOCHS } from "@/lib/cosmos/timeline";
 
 type OverlayRefs = {
@@ -9,7 +8,7 @@ type OverlayRefs = {
   onRestart: () => void;
 };
 
-/** Film grain + vignette + letterbox scrims — the cinema feel. */
+/** Film grain + vignette scrims — the cinema feel (static, compositor-cheap). */
 export function Atmosphere() {
   return (
     <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-[15]">
@@ -18,12 +17,12 @@ export function Atmosphere() {
         className="absolute inset-0"
         style={{
           background:
-            "radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.55) 100%)",
+            "radial-gradient(ellipse at center, transparent 62%, rgba(0,0,0,0.42) 100%)",
         }}
       />
-      {/* letterbox scrims for HUD legibility */}
-      <div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/70 to-transparent" />
-      <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-black/70 to-transparent" />
+      {/* scrims for HUD legibility */}
+      <div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/60 to-transparent" />
+      <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-black/60 to-transparent" />
       {/* film grain */}
       <div className="chronos-grain absolute -inset-[100px]" />
     </div>
@@ -38,18 +37,18 @@ export function Intro({ introRef }: Pick<OverlayRefs, "introRef">) {
       style={{ pointerEvents: "none" }}
     >
       <p className="font-mono text-[10px] uppercase tracking-[0.5em] text-amber-200/70 md:text-xs">
-        A 3-D dive through 13.8 billion years
+        A photographic dive through 13.8 billion years
       </p>
-      <h1 className="mt-4 font-display text-[clamp(3rem,12vw,9rem)] font-black uppercase leading-none tracking-[0.08em] text-white [text-shadow:0_0_80px_rgba(244,169,69,0.45)]">
+      <h1 className="mt-4 font-display text-[clamp(3.4rem,13vw,10rem)] font-semibold uppercase leading-none tracking-[0.04em] text-[#ece9e2] [text-shadow:0_0_90px_rgba(244,169,69,0.4)]">
         Chronos
       </h1>
-      <p className="mt-5 max-w-xl text-balance font-display text-base italic text-white/65 md:text-xl">
+      <p className="mt-5 max-w-xl text-balance font-display text-base italic text-white/70 md:text-xl">
         Zoom into the fabric of spacetime itself — from the fireball of the Big
-        Bang to the pale blue dot you call home. Every era is a world you fall
-        into.
+        Bang to the pale blue dot you call home. Every era is a real photograph
+        you fall into.
       </p>
       <p className="mt-8 font-mono text-[10px] uppercase tracking-[0.4em] text-white/35 md:text-[11px]">
-        19 worlds · 5 mass extinctions · 1 extraordinary planet
+        {EPOCHS.length} worlds · 5 mass extinctions · 1 extraordinary planet
       </p>
     </div>
   );
@@ -65,9 +64,9 @@ export function Outro({ outroRef, onRestart }: Omit<OverlayRefs, "introRef">) {
       <p className="font-mono text-[10px] uppercase tracking-[0.5em] text-white/40 md:text-xs">
         End of transmission
       </p>
-      <h2 className="mt-4 max-w-3xl font-display text-[clamp(1.8rem,5.5vw,4rem)] font-bold uppercase leading-[1.08] tracking-tight text-white">
+      <h2 className="mt-4 max-w-3xl font-display text-[clamp(1.9rem,5.5vw,4.2rem)] font-semibold leading-[1.08] tracking-tight text-[#ece9e2]">
         Everything that has ever lived was made of stardust —{" "}
-        <span className="text-amber-200">including you.</span>
+        <span className="italic text-amber-200">including you.</span>
       </h2>
       <p className="mt-5 max-w-xl text-sm leading-relaxed text-white/60 md:text-base">
         {EPOCHS.length} worlds · 13.8 billion years · five mass extinctions survived ·
@@ -85,27 +84,6 @@ export function Outro({ outroRef, onRestart }: Omit<OverlayRefs, "introRef">) {
         <span>Chronos — a 3D cinematic history of everything</span>
         <span>From the Big Bang to 2025 CE · Built with Z.ai</span>
       </footer>
-    </div>
-  );
-}
-
-/** Faint portrait of Earth for the outro backdrop */
-export function OutroBackdrop() {
-  return (
-    <div
-      aria-hidden="true"
-      className="pointer-events-none fixed inset-0 z-[9] opacity-0"
-      id="outro-backdrop"
-    >
-      <Image
-        src="/cosmos/paleblue.webp"
-        alt=""
-        fill
-        sizes="100vw"
-        unoptimized
-        className="object-cover"
-      />
-      <div className="absolute inset-0 bg-black/55" />
     </div>
   );
 }

@@ -1,12 +1,13 @@
 import type { Metadata, Viewport } from "next";
-import { Space_Grotesk, Space_Mono } from "next/font/google";
+import { Fraunces, Space_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "@/components/ui/toaster";
 
-const display = Space_Grotesk({
+const display = Fraunces({
   variable: "--font-display-src",
   subsets: ["latin"],
-  weight: ["400", "500", "700"],
+  weight: ["300", "400", "500", "600", "700", "900"],
+  style: ["normal", "italic"],
 });
 
 const mono = Space_Mono({
