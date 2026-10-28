@@ -34,21 +34,22 @@ export function Intro({ introRef }: Pick<OverlayRefs, "introRef">) {
   return (
     <div
       ref={introRef}
-      className="fixed inset-0 z-30 flex flex-col items-center justify-center px-6 text-center will-change-transform"
+      className="fixed inset-0 z-30 flex flex-col items-center justify-center px-6 pt-24 text-center will-change-transform md:pt-28"
       style={{ pointerEvents: "none" }}
     >
       <p className="font-mono text-[10px] uppercase tracking-[0.5em] text-amber-200/70 md:text-xs">
-        A journey of 13.8 billion years
+        A 3-D dive through 13.8 billion years
       </p>
       <h1 className="mt-4 font-display text-[clamp(3rem,12vw,9rem)] font-black uppercase leading-none tracking-[0.08em] text-white [text-shadow:0_0_80px_rgba(244,169,69,0.45)]">
         Chronos
       </h1>
       <p className="mt-5 max-w-xl text-balance font-display text-base italic text-white/65 md:text-xl">
-        From the fireball of the Big Bang to the pale blue dot you call home —
-        fall through time at the speed of light.
+        Zoom into the fabric of spacetime itself — from the fireball of the Big
+        Bang to the pale blue dot you call home. Every era is a world you fall
+        into.
       </p>
       <p className="mt-8 font-mono text-[10px] uppercase tracking-[0.4em] text-white/35 md:text-[11px]">
-        19 stops · 5 mass extinctions · 1 extraordinary planet
+        19 worlds · 5 mass extinctions · 1 extraordinary planet
       </p>
     </div>
   );
@@ -58,7 +59,7 @@ export function Outro({ outroRef, onRestart }: Omit<OverlayRefs, "introRef">) {
   return (
     <div
       ref={outroRef}
-      className="fixed inset-0 z-30 flex flex-col items-center justify-center px-6 text-center will-change-transform"
+      className="fixed inset-0 z-30 flex flex-col items-center justify-center px-6 pt-20 text-center will-change-transform md:pt-24"
       style={{ opacity: 0, pointerEvents: "none" }}
     >
       <p className="font-mono text-[10px] uppercase tracking-[0.5em] text-white/40 md:text-xs">
@@ -69,7 +70,7 @@ export function Outro({ outroRef, onRestart }: Omit<OverlayRefs, "introRef">) {
         <span className="text-amber-200">including you.</span>
       </h2>
       <p className="mt-5 max-w-xl text-sm leading-relaxed text-white/60 md:text-base">
-        {EPOCHS.length} stops · 13.8 billion years · five mass extinctions survived ·
+        {EPOCHS.length} worlds · 13.8 billion years · five mass extinctions survived ·
         one species now holds the pen. The next chapter is unwritten.
       </p>
 
@@ -81,7 +82,7 @@ export function Outro({ outroRef, onRestart }: Omit<OverlayRefs, "introRef">) {
       </button>
 
       <footer className="absolute inset-x-0 bottom-0 flex flex-col items-center gap-1.5 pb-[max(1.25rem,env(safe-area-inset-bottom))] font-mono text-[9px] uppercase tracking-[0.3em] text-white/30 md:text-[10px]">
-        <span>Chronos — a cinematic history of everything</span>
+        <span>Chronos — a 3D cinematic history of everything</span>
         <span>From the Big Bang to 2025 CE · Built with Z.ai</span>
       </footer>
     </div>
