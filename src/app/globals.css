@@ -181,4 +181,63 @@ body {
   .chronos-bounce {
     animation: none;
   }
+  .chronos-float,
+  .chronos-drift {
+    animation: none !important;
+  }
+}
+
+/* ---- CHRONOS 3D ---- */
+
+/* floating glass text panels breathe inside the 3D world */
+.chronos-float {
+  animation: chronos-float-y 8s ease-in-out infinite;
+}
+
+@keyframes chronos-float-y {
+  0%,
+  100% {
+    transform: translateY(-5px);
+  }
+  50% {
+    transform: translateY(6px);
+  }
+}
+
+/* era dust particles drifting at their own depth */
+.chronos-drift {
+  animation: chronos-particle linear infinite;
+}
+
+@keyframes chronos-particle {
+  0% {
+    transform: translate3d(0, 14px, 0);
+    opacity: 0;
+  }
+  18% {
+    opacity: var(--po, 0.7);
+  }
+  82% {
+    opacity: var(--po, 0.7);
+  }
+  100% {
+    transform: translate3d(var(--dx, 10px), -30px, 0);
+    opacity: 0;
+  }
+}
+
+/* slim scrollbar inside floating panels */
+.chronos-panel-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+}
+.chronos-panel-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+.chronos-panel-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.chronos-panel-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
 }

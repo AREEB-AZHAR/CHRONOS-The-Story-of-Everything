@@ -82,7 +82,7 @@ export default function TimeHUD({
       {/* warp meter */}
       <div className="absolute bottom-5 left-4 md:bottom-8 md:left-8">
         <p className="font-mono text-[9px] uppercase tracking-[0.3em] text-white/35">
-          Light-speed odometer
+          Dive velocity
         </p>
         <div className="mt-1 flex items-center gap-2">
           <span
@@ -141,7 +141,7 @@ export default function TimeHUD({
         id="scroll-hint"
       >
         <span className="font-mono text-[10px] uppercase tracking-[0.35em] text-white/50">
-          Scroll to begin the journey
+          Scroll to dive into time
         </span>
         <span className="chronos-bounce text-white/60" aria-hidden="true">
           ↓

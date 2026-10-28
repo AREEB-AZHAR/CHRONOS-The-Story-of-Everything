@@ -16,25 +16,25 @@ const mono = Space_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CHRONOS — From the Big Bang to You",
+  title: "CHRONOS 3D — Dive Through 13.8 Billion Years",
   description:
-    "A cinematic scroll-through-time experience: fall through 13.8 billion years at the speed of light — from the Big Bang and the first stars to dinosaurs, mass extinctions, and the Earth of today.",
+    "A cinematic 3D scroll experience: zoom into the fabric of spacetime and fly through 13.8 billion years — from the Big Bang and the first stars to dinosaurs, mass extinctions, and the Earth of today.",
   keywords: [
     "Big Bang",
     "history of the universe",
     "evolution",
     "mass extinctions",
     "cosmic timeline",
-    "cinematic scroll",
+    "3D scroll experience",
   ],
   authors: [{ name: "Z.ai" }],
   icons: {
     icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
   },
   openGraph: {
-    title: "CHRONOS — From the Big Bang to You",
+    title: "CHRONOS 3D — Dive Through 13.8 Billion Years",
     description:
-      "Fall through 13.8 billion years at the speed of light. 19 stops, 5 mass extinctions, 1 extraordinary planet.",
+      "Zoom into spacetime and fly through 13.8 billion years. 19 worlds, 5 mass extinctions, 1 extraordinary planet.",
     type: "website",
   },
 };
