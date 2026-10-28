@@ -55,3 +55,42 @@ Stage Summary:
 - Shipped CHRONOS 3D: full-bleed layered 3D environments, camera dives INTO each era and accelerates through it at light speed between eras, radial warp starfield, floating glass panels with extinction memorials
 - Files: src/lib/cosmos/depth.ts (new), src/components/cosmos/{DepthStage,StarfieldZoom}.tsx (new), CosmicExperience.tsx (rewritten), TimeHUD/Overlays (copy + padding fixes), globals.css (float/drift/scrollbar keyframes); deleted EpochStage.tsx, WarpCanvas.tsx
 - Status: DONE — browser-verified desktop + mobile, lint clean, all assets 200
+
+---
+Task ID: 4-a
+Agent: general-purpose subagent
+Task: High-res era imagery pipeline — replace all 19 era backgrounds with genuinely high-res, photorealistic, cinematic imagery (real photos preferred)
+
+Work Log:
+- Ran z-ai image-search for all 19 eras (primary query per era; searches were fast, 4-60s each), parsed JSON with bun (strip log lines, take substring from first "{")
+- Hard candidate rules applied via scripts/hires-fetch-candidates.ts + hires-validate.ts: original width >=1600px (prefer >=2000), width>=height, real sharp metadata >=1600w; downloaded 62/62 candidates OK from OSS URLs
+- VLM-judged each era's top 3 candidates in ONE z-ai vision call (sharpness / watermark / subject / mood, WINNER line parsed) — scripts/hires-judge.ts; 18/19 eras picked a real-photo winner on the primary query
+- paleblue primary returned only "Earth limb" (VLM: NONE on strict full-disk criteria); ran fallback query "Earth horizon from space station ISS photograph high resolution", downloaded 3 more (WallpaperCat 2309px, hdqwalls 4845px, Quartz 1920px) and re-judged together with the 4588px limb shot — winner: hdqwalls 4845x2725 Earth-from-space
+- Era winners (id — source — original res): bigbang — NASA Science — 2000x1158; firstlight — European Space Agency — 2160x1080; firststars — ESA/Webb — 3840x2160 (VLM runner-up at 1889px also passed; picked >=2000px per hard rule); galaxies — Eso.org — 3375x3362; milkyway — Wallpaper Abyss — 3840x2160; sunborn — The Wire Science — 2560x1609; earthborn — TIME — 2048x2048 (Earthrise-style Earth+Moon); firstocean — NOAA Ocean Exploration — 1920x1080 (black smoker); oxygen — Nordical Iceland — 2560x1709 (blue ice cave); cambrian — Wallpaper Abyss — 1600x1200 (trilobite fossil); landfall — Wide Open Spaces — 2500x1668; greatdying — Nordic Visitor — 1920x1080 (fissure eruption); dinosaurs — The Mercury News — 5472x3648 (T. rex mount); asteroid — Phys.org — 1920x1080; mammals — Adventure.com — 3000x1996 (misty savanna elephants); humans — Unsplash — 3000x1997 (acacia sunset); journeys — Don's Maps — 5190x2425 (Lascaux); civilization — NASA Science — 4128x2752 (night lights); paleblue — hdqwalls — 4845x2725
+- Finalized winners to /tmp/hires/{id}-src + attribution manifest (/tmp/hires/winners.json); scripts/hires-finalize.ts
+- scripts/hires-optimize.ts (sharp): 19 sources -> public/cosmos/{id}.webp (resize 2560x1440 cover/attention, webp q86) + {id}-m.webp (1280x720 cover/attention, q80) — 38 files overwritten in place; journeys.webp is NEW
+- Verification scripts/hires-verify.ts: all 38 files OK (2560x1440 / 1280x720 webp, 0 failures, 12.50MB total); VLM spot-check of 5 riskiest finals (galaxies, earthborn, landfall, cambrian, paleblue) — all open, sharp, subject-correct, watermark-free, OVERALL: PASS
+- Added public/cosmos/CREDITS.md (era -> source table + "imagery: public web search results, used for a demo experience" note); tex-*.webp and firstlife.webp untouched; no src/ changes
+
+Stage Summary:
+- ALL 19 eras got real photography (search-sourced at 1600-5472px original width) — zero AI-generation fallbacks needed
+- 1 fallback query used: paleblue (primary gave only limb shots / VLM NONE); everything else passed on primary query
+- Final state: 38 verified webp files (19 x 2 sizes) in public/cosmos, from 2000px+ sources for 16/19 eras (firstocean 1920, greatdying 1920, asteroid 1920, cambrian 1600 are the smallest); total 12.5MB; CREDITS.md written; ready for pipeline stage 4-b
+
+---
+Task ID: 4-b + 5
+Agent: Z.ai Code (main)
+Task: Rebuild CHRONOS as a reliwebgl-style WebGL time-dive (fix blur + lag) — engine, panels, editorial restyle; full browser verification
+
+Work Log:
+- Studied reference reliwebgl.com (agent-browser + VLM): architecture = single fixed three.js canvas + 460vh scroll track + sticky screen, DOM text on top, photoreal DOF scenes, editorial serif type — adopted all of it
+- Proved current lag root cause: 25 fullscreen DOM layers with per-frame CSS blur/blend/preserve-3d (A/B test on port 3005 via git worktree: old p95 spikes 400-600ms)
+- Installed three.js r186; built src/lib/cosmos/engine3d.ts (~700 lines): 19 era slabs (planes, PLANE 35.2x84.5) along a -Z corridor (spacing 60), camera path hold(±0.14 segment)→smootherstep transit→hold, FOV 55+9·warp, mouse-parallax rotation, recycled 1400-star field with radial streaks, 90 dust motes, 18 procedural fbm nebulae, per-slab shader (cover-crop, Ken Burns, warp 3-tap smear, polynomial S-curve grade, extinction red, window mask+rim glow making distant eras "gates in spacetime"), progressive texture window ±3/±5 dispose, soft-GPU detection (SwiftShader/lavapipe) → -m textures, reduced particles, 0.8 render scale, idle frame-skip
+- Rewrote CosmicExperience.tsx: rAF loop drives engine + guarded DOM writes (setStyle/setText value cache — zero redundant mutations); TextLayer.tsx (fixed floating glass panels, engine-written transform/opacity, no counter-transform gymnastics); Overlays restyled (Fraunces serif #ece9e2, removed OutroBackdrop — engine renders final plate); layout.tsx Fraunces+Space_Mono; TimeHUD dark text-shadow halo; deleted DepthStage/StarfieldZoom/depth.ts + tex-*.webp
+- Bugs found & fixed via browser: (1) GLSL precision mismatch uWarp mediump-vs-highp → program link fail, black canvas; (2) sign inversion on slab/nebula distance (d = slabZ-camZ) → all plates invisible; (3) panel alpha used 1-arg smoothstep with 3 args → alpha always 0, panels never visible (3-arg smoothRange helper); (4) stale visible panels after rail jumps (sweep all 19 with value cache)
+- Verification: shader-link clean, 7-point visual sweep VLM-rated 9-10/10 (intro/Big Bang/transit/Sun/Dinosaurs/Asteroid/Earth outro); panel sweep — exactly one correct panel per era anchor (0,2,9,11,13,18 spot-checked, titles match); rail jump → single panel, no stale; mobile 390x844: 61fps, bottom-sheet panels readable; A/B: new engine ~3x lower p95 than old DOM-3D in identical software-GL conditions (real GPUs: scene = ~25 draw calls, trivial); lint clean; zero console errors
+
+Stage Summary:
+- Shipped CHRONOS v3: one WebGL canvas flies a camera THROUGH 19 photographic era plates — next era visible ahead as a glowing spacetime gate, light-speed warp between, floating readable panels; all 19 backgrounds are real high-res photography (2560x1440) from Task 4-a
+- Files: engine3d.ts (new), CosmicExperience.tsx/TextLayer.tsx/Overlays.tsx (rewritten), layout.tsx (Fraunces), TimeHUD.tsx (shadow), globals.css (pruned); deleted depth.ts/DepthStage/StarfieldZoom
+- Status: DONE — browser-verified end-to-end desktop+mobile, lint clean, worklog appended

@@ -1,38 +1,28 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import StarfieldZoom from "./StarfieldZoom";
-import DepthStage from "./DepthStage";
+import TextLayer from "./TextLayer";
 import TimeHUD from "./TimeHUD";
-import { Atmosphere, Intro, Outro, OutroBackdrop } from "./Overlays";
+import { Atmosphere, Intro, Outro } from "./Overlays";
 import { EPOCHS, ANCHORS, INTRO_END, OUTRO_START, SPACING } from "@/lib/cosmos/timeline";
 import { yearsAgoAt, formatYears, clamp, smoothstep } from "@/lib/cosmos/format";
 import { hexToRgb, mixRgb, rgba, type EngineState } from "@/lib/cosmos/engine-state";
-import {
-  SLOT,
-  LAYER_Z,
-  LAYER_STATIC_BLUR,
-  LAYER_BLUR_WEIGHT,
-  TEXTURES,
-  comp,
-  sceneMotion,
-  PANEL_Z,
-  PERSPECTIVE,
-} from "@/lib/cosmos/depth";
+import { ChronosEngine } from "@/lib/cosmos/engine3d";
+
+/** 3-arg smoothstep over a range (format.ts's is the 1-arg classic form). */
+const smoothRange = (e0: number, e1: number, x: number) => {
+  const t = clamp((x - e0) / (e1 - e0 || 1e-6));
+  return t * t * (3 - 2 * t);
+};
 
 /**
- * CHRONOS 3D ENGINE
- * -----------------
- * Native scroll is only a *target*; a rAF loop glides a virtual cursor toward
- * it and flies a 3D camera through stacked image worlds. Each era is an
- * environment of depth layers (next-era ghost, hero plate, two blended
- * atmosphere textures, floating dust, glass text). Holding at an era dollies
- * the camera INTO it; between eras the camera accelerates THROUGH the world
- * while the next era rushes out of the void — a light-speed dive through time.
- *
- * Because CSS opacity/filter flatten preserve-3d subtrees, per-layer opacity
- * and blur are written individually every frame. No React re-renders occur
- * during the loop — all writes go straight to the DOM.
+ * CHRONOS 3D — WebGL time-dive (reliwebgl-style architecture)
+ * ----------------------------------------------------------------
+ * ONE fixed full-screen canvas renders every era as a 3D world you dive
+ * into (engine3d.ts). Native scroll is only a *target*; a rAF loop glides
+ * a virtual cursor toward it and drives the WebGL camera. The DOM carries
+ * only the floating text panels + HUD — written per frame with transform /
+ * opacity alone, so the whole experience stays on the GPU compositor.
  */
 
 export default function CosmicExperience() {
@@ -45,21 +35,9 @@ export default function CosmicExperience() {
     reducedMotion: false,
   });
 
-  // --- scene graph refs (written by the engine loop at 60fps) ---
-  const worldRef = useRef<HTMLDivElement | null>(null);
-  const sceneRefs = useRef<(HTMLDivElement | null)[]>(EPOCHS.map(() => null));
-  const layerRefs = useRef<(HTMLDivElement | null)[][]>(
-    EPOCHS.map(() => [null, null, null, null, null])
-  );
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const engineRef = useRef<ChronosEngine | null>(null);
   const panelRefs = useRef<(HTMLDivElement | null)[]>(EPOCHS.map(() => null));
-  const letterTopRef = useRef<HTMLDivElement | null>(null);
-  const letterBotRef = useRef<HTMLDivElement | null>(null);
-  const flashRef = useRef<HTMLDivElement | null>(null);
-  // per-scene panel layout centers (dx, dy from viewport center) for the
-  // perspective counter-transform that keeps floating text readable
-  const panelCenters = useRef<{ dx: number; dy: number }[]>(
-    EPOCHS.map(() => ({ dx: 0, dy: 0 }))
-  );
 
   // --- HUD refs ---
   const yearValueRef = useRef<HTMLSpanElement | null>(null);
@@ -70,6 +48,9 @@ export default function CosmicExperience() {
   const barRef = useRef<HTMLDivElement | null>(null);
   const introRef = useRef<HTMLDivElement | null>(null);
   const outroRef = useRef<HTMLDivElement | null>(null);
+  const letterTopRef = useRef<HTMLDivElement | null>(null);
+  const letterBotRef = useRef<HTMLDivElement | null>(null);
+  const flashRef = useRef<HTMLDivElement | null>(null);
 
   const [activeIndex, setActiveIndex] = useState(0);
   const [mounted, setMounted] = useState<Set<number>>(() => new Set([0, 1, 2]));
@@ -83,22 +64,6 @@ export default function CosmicExperience() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }, []);
 
-  // --- parent-owned register callbacks (React-compiler friendly) ---
-  const registerWorld = useCallback((el: HTMLDivElement | null) => {
-    worldRef.current = el;
-  }, []);
-  const registerScene = useCallback(
-    (i: number) => (el: HTMLDivElement | null) => {
-      sceneRefs.current[i] = el;
-    },
-    []
-  );
-  const registerLayer = useCallback(
-    (i: number, slot: number) => (el: HTMLDivElement | null) => {
-      layerRefs.current[i][slot] = el;
-    },
-    []
-  );
   const registerPanel = useCallback(
     (i: number) => (el: HTMLDivElement | null) => {
       panelRefs.current[i] = el;
@@ -106,38 +71,44 @@ export default function CosmicExperience() {
     []
   );
 
+  /* ---------- WebGL engine lifecycle ---------- */
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const isMobile = window.matchMedia("(max-width: 767px)").matches;
+    let engine: ChronosEngine | null = null;
+    try {
+      engine = new ChronosEngine(canvas, isMobile);
+      engineRef.current = engine;
+    } catch (e) {
+      // WebGL unavailable — the DOM journey (text, HUD) still works
+      console.warn("WebGL init failed", e);
+      return;
+    }
+    const onResize = () =>
+      engine?.resize(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1);
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      engine?.dispose();
+      engineRef.current = null;
+    };
+  }, []);
+
+  /* ---------- the cinematic loop ---------- */
   useEffect(() => {
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     stateRef.current.reducedMotion = reduced;
 
     let max = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
 
-    // measure panel layout boxes (offset* = layout values, immune to transforms)
-    const measurePanels = () => {
-      for (let i = 0; i < EPOCHS.length; i++) {
-        const el = panelRefs.current[i];
-        if (!el) continue;
-        panelCenters.current[i] = {
-          dx: el.offsetLeft + el.offsetWidth / 2 - window.innerWidth / 2,
-          dy: el.offsetTop + el.offsetHeight / 2 - window.innerHeight / 2,
-        };
-      }
-    };
-    measurePanels();
-
     const onResize = () => {
       max = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
-      measurePanels();
     };
     window.addEventListener("resize", onResize);
 
-    // per-slot base opacities (must mirror DepthStage's initial inline values)
-    const baseOps: number[][] = EPOCHS.map((e) => {
-      const tex = TEXTURES[e.id];
-      return [0.16, 1, tex.midOpacity, tex.nearOpacity, 0.95];
-    });
-
-    // mouse parallax (fine pointers only)
+    // mouse parallax targets (fine pointers only)
     let mxT = 0;
     let myT = 0;
     let mx = 0;
@@ -149,12 +120,34 @@ export default function CosmicExperience() {
     const canParallax = window.matchMedia("(pointer: fine)").matches;
     if (canParallax) window.addEventListener("mousemove", onMove, { passive: true });
 
+    const accentList = EPOCHS.map((e) => hexToRgb(e.accent));
+
     let cur = window.scrollY;
     let prevCur = cur;
     let last = performance.now();
     let raf = 0;
     let lastActive = -1;
     let hintHidden = false;
+    // last-written DOM values to avoid redundant style/layout work
+    const panelCache: number[][] = EPOCHS.map(() => [-1, -1]);
+    const dom: Record<string, string> = {};
+    const setStyle = (
+      el: HTMLElement | null,
+      prop: string,
+      val: string,
+      key?: string
+    ) => {
+      if (!el) return;
+      const k = key ?? prop;
+      if (dom[k] === val) return;
+      dom[k] = val;
+      (el.style as unknown as Record<string, string>)[prop] = val;
+    };
+    const setText = (el: HTMLElement | null, val: string, key: string) => {
+      if (!el || dom[key] === val) return;
+      dom[key] = val;
+      el.textContent = val;
+    };
 
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
@@ -179,6 +172,23 @@ export default function CosmicExperience() {
       s.progress = progress;
       s.velocity = velocity;
       s.speed = speed;
+      if (process.env.NODE_ENV !== "production") {
+        const w = window as unknown as Record<string, number>;
+        w.__chronosFrames = (w.__chronosFrames || 0) + 1;
+        w.__chronosProgress = progress;
+      }
+
+      // ---- WebGL world ----
+      if (canParallax) {
+        const pk = Math.min(1, dt * 3.2);
+        mx += (mxT - mx) * pk;
+        my += (myT - my) * pk;
+      } else {
+        mx = 0;
+        my = 0;
+      }
+      const warp = Math.min(1, speed / (window.innerHeight * 0.075));
+      engineRef.current?.update({ progress, warp, pointerX: mx, pointerY: my, reduced }, now);
 
       // ---- era accent interpolation ----
       let ai = 0;
@@ -186,25 +196,18 @@ export default function CosmicExperience() {
       const a0 = ANCHORS[ai];
       const a1 = ANCHORS[Math.min(ai + 1, ANCHORS.length - 1)];
       const u = clamp((progress - a0) / Math.max(a1 - a0, 1e-6));
-      const accentList = EPOCHS.map((e) => hexToRgb(e.accent));
-      const c = mixRgb(
-        accentList[ai],
-        accentList[Math.min(ai + 1, accentList.length - 1)],
-        u
-      );
+      const c = mixRgb(accentList[ai], accentList[Math.min(ai + 1, accentList.length - 1)], u);
       s.accent = c;
       s.accentCss = rgba(c, 1);
 
       // ---- odometer ----
-      const yearsAgo = yearsAgoAt(progress);
-      const f = formatYears(yearsAgo);
+      const f = formatYears(yearsAgoAt(progress));
+      setText(yearValueRef.current, f.value, "yv");
+      setText(yearUnitRef.current, f.unit, "yu");
       if (yearValueRef.current) {
-        yearValueRef.current.textContent = f.value;
-        const blur = Math.min(2.6, speed / 55);
-        yearValueRef.current.style.filter = blur > 0.35 ? `blur(${blur.toFixed(2)}px)` : "none";
-        yearValueRef.current.style.textShadow = `0 0 ${18 + Math.min(70, speed)}px ${rgba(c, 0.35)}`;
+        const ts = `0 2px 26px rgba(0,0,0,0.92), 0 0 ${18 + Math.min(70, speed)}px ${rgba(c, 0.32)}`;
+        setStyle(yearValueRef.current, "textShadow", ts, "yts");
       }
-      if (yearUnitRef.current) yearUnitRef.current.textContent = f.unit;
 
       // ---- era chip + active stop ----
       let nearest = 0;
@@ -221,57 +224,84 @@ export default function CosmicExperience() {
         const atEnd = progress > OUTRO_START + 0.02 && nearest === EPOCHS.length - 1;
         const holding = nd < SPACING * 0.3 || atStart || atEnd;
         const compact = window.innerWidth < 640;
-        eraRef.current.textContent = holding
+        const eraText = holding
           ? EPOCHS[nearest].era
           : compact
             ? "IN TRANSIT"
             : "IN TRANSIT · LIGHT SPEED";
-        eraRef.current.style.color = holding ? EPOCHS[nearest].accent : "rgba(255,255,255,0.65)";
-        eraRef.current.style.borderColor = holding
-          ? `${EPOCHS[nearest].accent}66`
-          : "rgba(255,255,255,0.1)";
+        setText(eraRef.current, eraText, "era");
+        setStyle(
+          eraRef.current,
+          "color",
+          holding ? EPOCHS[nearest].accent : "rgba(255,255,255,0.65)",
+          "eraC"
+        );
+        setStyle(
+          eraRef.current,
+          "borderColor",
+          holding ? `${EPOCHS[nearest].accent}66` : "rgba(255,255,255,0.1)",
+          "eraB"
+        );
       }
 
       // ---- warp meter ----
       const cFrac = Math.min(0.999, speed / (window.innerHeight * 0.085));
+      setText(
+        warpRef.current,
+        cFrac > 0.006 ? `${cFrac.toFixed(2)} c` : "ORBIT HOLD",
+        "warp"
+      );
       if (warpRef.current) {
-        warpRef.current.textContent = cFrac > 0.006 ? `${cFrac.toFixed(2)} c` : "ORBIT HOLD";
-        warpRef.current.style.color = cFrac > 0.6 ? "#fda4af" : undefined;
+        const wc = cFrac > 0.6 ? "#fda4af" : "";
+        setStyle(warpRef.current, "color", wc, "warpC");
       }
       if (warpBarRef.current) {
-        warpBarRef.current.style.transform = `scaleX(${Math.min(1, cFrac).toFixed(3)})`;
+        setStyle(
+          warpBarRef.current,
+          "transform",
+          `scaleX(${Math.min(1, cFrac).toFixed(3)})`,
+          "warpBar"
+        );
       }
 
       // ---- hairline progress ----
-      if (barRef.current) barRef.current.style.transform = `scaleX(${progress.toFixed(4)})`;
-
-      // ---- mouse parallax on the whole world ----
-      if (canParallax && worldRef.current) {
-        const pk = Math.min(1, dt * 3.2);
-        mx += (mxT - mx) * pk;
-        my += (myT - my) * pk;
-        worldRef.current.style.transform = `rotateY(${(mx * 2.4).toFixed(3)}deg) rotateX(${(-my * 1.8).toFixed(3)}deg)`;
+      if (barRef.current) {
+        setStyle(barRef.current, "transform", `scaleX(${progress.toFixed(4)})`, "bar");
       }
 
       // ---- cinematic letterbox slides in at warp ----
-      const vNorm = Math.min(1, speed / (window.innerHeight * 0.075));
+      const vNorm = warp;
       if (letterTopRef.current) {
-        letterTopRef.current.style.transform = `translateY(${((vNorm - 1) * 100).toFixed(1)}%)`;
+        setStyle(
+          letterTopRef.current,
+          "transform",
+          `translateY(${((vNorm - 1) * 100).toFixed(1)}%)`,
+          "lt"
+        );
       }
       if (letterBotRef.current) {
-        letterBotRef.current.style.transform = `translateY(${((1 - vNorm) * 100).toFixed(1)}%)`;
+        setStyle(
+          letterBotRef.current,
+          "transform",
+          `translateY(${((1 - vNorm) * 100).toFixed(1)}%)`,
+          "lb"
+        );
       }
-      // ---- hyperspace flash at the moment of era-crossing ----
       if (flashRef.current) {
         const flash = Math.max(0, vNorm - 0.72) * 0.28;
-        flashRef.current.style.opacity = Math.min(0.16, flash).toFixed(3);
+        setStyle(flashRef.current, "opacity", Math.min(0.14, flash).toFixed(3), "fl");
       }
 
       // ---- intro ----
       if (introRef.current) {
         const o = 1 - smoothstep(progress / (INTRO_END * 0.8));
-        introRef.current.style.opacity = o.toFixed(3);
-        introRef.current.style.transform = `translate3d(0, ${((1 - o) * -46).toFixed(1)}px, 0) scale(${(1 + (1 - o) * 0.08).toFixed(4)})`;
+        setStyle(introRef.current, "opacity", o.toFixed(3), "inO");
+        setStyle(
+          introRef.current,
+          "transform",
+          `translate3d(0, ${((1 - o) * -46).toFixed(1)}px, 0) scale(${(1 + (1 - o) * 0.08).toFixed(4)})`,
+          "inT"
+        );
       }
 
       // ---- scroll hint ----
@@ -289,67 +319,36 @@ export default function CosmicExperience() {
       // ---- outro ----
       if (outroRef.current) {
         const o = smoothstep((progress - OUTRO_START) / 0.03);
-        outroRef.current.style.opacity = o.toFixed(3);
-        outroRef.current.style.pointerEvents = o > 0.6 ? "auto" : "none";
-        outroRef.current.style.transform = `translate3d(0, ${((1 - o) * 30).toFixed(1)}px, 0)`;
-      }
-      const backdrop = document.getElementById("outro-backdrop");
-      if (backdrop) {
-        backdrop.style.opacity = smoothstep((progress - (OUTRO_START - 0.012)) / 0.04).toFixed(3);
+        setStyle(outroRef.current, "opacity", o.toFixed(3), "outO");
+        setStyle(outroRef.current, "pointerEvents", o > 0.6 ? "auto" : "none", "outP");
+        setStyle(
+          outroRef.current,
+          "transform",
+          `translate3d(0, ${((1 - o) * 30).toFixed(1)}px, 0)`,
+          "outT"
+        );
       }
 
-      // ---- THE 3D CAMERA: fly through every mounted world ----
+      // ---- floating text panels (transform/opacity only) ----
+      // sweep ALL panels: the per-panel value cache makes hidden-writes
+      // one-shot, and it guarantees no stale visible panel after rail jumps
       for (let i = 0; i < EPOCHS.length; i++) {
-        const root = sceneRefs.current[i];
-        if (!root) continue;
+        const el = panelRefs.current[i];
+        if (!el) continue;
         const phase = (progress - ANCHORS[i]) / SPACING;
-        const m = sceneMotion(phase);
-        if (!m.active) {
-          if (root.style.visibility !== "hidden") {
-            root.style.visibility = "hidden";
-            root.style.opacity = "0";
-          }
-          continue;
-        }
-        root.style.visibility = "visible";
-        root.style.opacity = "1";
-        root.style.transform = `translate3d(0, 0, ${m.z.toFixed(1)}px) rotateX(${m.rotX.toFixed(2)}deg)`;
-
-        const layers = layerRefs.current[i];
-        if (layers) {
-          for (let slot = 0; slot <= SLOT.DUST; slot++) {
-            const el = layers[slot];
-            if (!el) continue;
-            el.style.opacity = (baseOps[i][slot] * m.opacity).toFixed(3);
-            const totalBlur = LAYER_STATIC_BLUR[slot] + m.blur * LAYER_BLUR_WEIGHT[slot];
-            el.style.filter = totalBlur > 0.05 ? `blur(${totalBlur.toFixed(2)}px)` : "none";
-          }
-          // hero plate: slow Ken Burns breathing on top of the camera dolly
-          const main = layers[SLOT.MAIN];
-          if (main) {
-            const breathe = 1 + 0.032 * Math.sin(now * 0.00011 + i * 1.7);
-            const baseScale = comp(LAYER_Z[SLOT.MAIN], 1.05);
-            main.style.transform = `translateZ(${LAYER_Z[SLOT.MAIN]}px) scale(${(baseScale * breathe).toFixed(4)})`;
-          }
-        }
-        const panel = panelRefs.current[i];
-        if (panel) {
-          // perspective counter-transform: keep the card's screen position
-          // ~82% locked (readable) while still drifting with the world
-          const zEff = Math.min(PANEL_Z + m.z, PERSPECTIVE * 0.9);
-          const mm = PERSPECTIVE / Math.max(60, PERSPECTIVE - zEff);
-          const c = panelCenters.current[i];
-          const KEEP = 0.82;
-          panel.style.transform =
-            `translateZ(${PANEL_Z}px) ` +
-            `translateX(${(-(mm - 1) * c.dx * KEEP).toFixed(1)}px) ` +
-            `translateY(${(-(mm - 1) * c.dy * KEEP).toFixed(1)}px) ` +
-            `scale(${(1 / mm).toFixed(4)})`;
-          panel.style.opacity = m.panel.toFixed(3);
-          // the inner card is scrollable — only while actually visible
-          const card = panel.firstElementChild?.firstElementChild as HTMLElement | null;
-          if (card) card.style.pointerEvents = m.panel > 0.45 ? "auto" : "none";
-        }
+        const alpha =
+          smoothRange(-0.148, -0.102, phase) * (1 - smoothRange(0.102, 0.148, phase));
+        const aR = Math.round(alpha * 100) / 100;
+        if (Math.abs(aR - panelCache[i][0]) < 0.005) continue;
+        panelCache[i][0] = aR;
+        const vis = aR > 0.004;
+        el.style.visibility = vis ? "visible" : "hidden";
+        el.style.opacity = aR.toFixed(3);
+        const y = (1 - alpha) * 28;
+        const sc = 0.985 + 0.015 * alpha;
+        el.style.transform = `translate3d(0, ${y.toFixed(1)}px, 0) scale(${sc.toFixed(4)})`;
+        const card = el.firstElementChild?.firstElementChild as HTMLElement | null;
+        if (card) card.style.pointerEvents = alpha > 0.45 ? "auto" : "none";
       }
 
       // ---- react state (only on stop change) ----
@@ -362,9 +361,7 @@ export default function CosmicExperience() {
             const i = nearest + d;
             if (i >= 0 && i < EPOCHS.length) next.add(i);
           }
-          const changed = next.size !== prev.size;
-          if (changed) setTimeout(measurePanels, 60);
-          return changed ? next : prev;
+          return next.size !== prev.size ? next : prev;
         });
       }
     };
@@ -382,16 +379,18 @@ export default function CosmicExperience() {
       {/* scroll track — the only in-flow element; defines journey length */}
       <div aria-hidden="true" className="h-[2600svh] w-full" />
 
-      {/* fixed cinematic layers */}
-      <StarfieldZoom stateRef={stateRef} />
-      <OutroBackdrop />
-      <DepthStage
-        mounted={mounted}
-        registerWorld={registerWorld}
-        registerScene={registerScene}
-        registerLayer={registerLayer}
-        registerPanel={registerPanel}
+      {/* THE 3D WORLD — one fixed WebGL canvas */}
+      <canvas
+        ref={canvasRef}
+        aria-label="Cinematic 3D journey through 13.8 billion years"
+        role="img"
+        className="fixed inset-0 z-10 h-full w-full"
       />
+
+      {/* floating readable text */}
+      <TextLayer mounted={mounted} registerPanel={registerPanel} />
+
+      {/* film grain + vignette scrims */}
       <Atmosphere />
 
       {/* warp letterbox + hyperspace flash */}
@@ -406,10 +405,7 @@ export default function CosmicExperience() {
           className="absolute inset-x-0 bottom-0 h-[3.4vh] bg-black"
           style={{ transform: "translateY(100%)" }}
         />
-        <div
-          ref={flashRef}
-          className="absolute inset-0 bg-white opacity-0 mix-blend-screen"
-        />
+        <div ref={flashRef} className="absolute inset-0 bg-white opacity-0" />
       </div>
 
       <TimeHUD

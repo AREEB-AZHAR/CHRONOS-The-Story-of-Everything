@@ -67,7 +67,7 @@ export default function TimeHUD({
         <span
           ref={yearValueRef}
           className="font-mono text-[clamp(1.6rem,6vw,3.6rem)] font-bold leading-none tracking-tight text-white"
-          style={{ textShadow: "0 0 30px rgba(244,169,69,0.35)" }}
+          style={{ textShadow: "0 2px 26px rgba(0,0,0,0.92), 0 0 30px rgba(244,169,69,0.35)" }}
         >
           13.80
         </span>

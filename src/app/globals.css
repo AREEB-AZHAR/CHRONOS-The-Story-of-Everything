@@ -204,28 +204,6 @@ body {
   }
 }
 
-/* era dust particles drifting at their own depth */
-.chronos-drift {
-  animation: chronos-particle linear infinite;
-}
-
-@keyframes chronos-particle {
-  0% {
-    transform: translate3d(0, 14px, 0);
-    opacity: 0;
-  }
-  18% {
-    opacity: var(--po, 0.7);
-  }
-  82% {
-    opacity: var(--po, 0.7);
-  }
-  100% {
-    transform: translate3d(var(--dx, 10px), -30px, 0);
-    opacity: 0;
-  }
-}
-
 /* slim scrollbar inside floating panels */
 .chronos-panel-scroll {
   scrollbar-width: thin;
