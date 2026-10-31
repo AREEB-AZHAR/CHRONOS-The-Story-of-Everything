@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Fraunces, Space_Mono } from "next/font/google";
 import "./globals.css";
-import { Toaster } from "@/components/ui/toaster";
 
 const display = Fraunces({
   variable: "--font-display-src",
@@ -17,25 +16,27 @@ const mono = Space_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CHRONOS 3D — Dive Through 13.8 Billion Years",
+  title: "CHRONOS ∞ — Stand at the Centre of Spacetime",
   description:
-    "A cinematic 3D scroll experience: zoom into the fabric of spacetime and fly through 13.8 billion years — from the Big Bang and the first stars to dinosaurs, mass extinctions, and the Earth of today.",
+    "You are the centre of the universe. Thirty worlds orbit around you in an infinite 4D stream — from the Big Bang and the first stars to dinosaurs, five mass extinctions, humanity and the present day. Scroll to travel 13.8 billion years; click any moment and it flies to you.",
   keywords: [
     "Big Bang",
     "history of the universe",
     "evolution",
     "mass extinctions",
+    "dinosaurs",
     "cosmic timeline",
     "3D scroll experience",
+    "WebGL",
   ],
   authors: [{ name: "Z.ai" }],
   icons: {
     icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
   },
   openGraph: {
-    title: "CHRONOS 3D — Dive Through 13.8 Billion Years",
+    title: "CHRONOS ∞ — Stand at the Centre of Spacetime",
     description:
-      "Zoom into spacetime and fly through 13.8 billion years. 19 worlds, 5 mass extinctions, 1 extraordinary planet.",
+      "An infinite 4D stream of 13.8 billion years. 30 worlds, 5 mass extinctions, 1 extraordinary planet — orbiting all around you.",
     type: "website",
   },
 };
@@ -44,6 +45,8 @@ export const viewport: Viewport = {
   themeColor: "#020107",
   width: "device-width",
   initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
 };
 
 export default function RootLayout({
@@ -57,7 +60,6 @@ export default function RootLayout({
         className={`${display.variable} ${mono.variable} antialiased bg-[#020107] text-white`}
       >
         {children}
-        <Toaster />
       </body>
     </html>
   );

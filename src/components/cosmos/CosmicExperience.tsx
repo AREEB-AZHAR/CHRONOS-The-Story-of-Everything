@@ -1,90 +1,75 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import TextLayer from "./TextLayer";
 import TimeHUD from "./TimeHUD";
-import { Atmosphere, Intro, Outro } from "./Overlays";
-import { EPOCHS, ANCHORS, INTRO_END, OUTRO_START, SPACING } from "@/lib/cosmos/timeline";
-import { yearsAgoAt, formatYears, clamp, smoothstep } from "@/lib/cosmos/format";
-import { hexToRgb, mixRgb, rgba, type EngineState } from "@/lib/cosmos/engine-state";
-import { ChronosEngine } from "@/lib/cosmos/engine3d";
-
-/** 3-arg smoothstep over a range (format.ts's is the 1-arg classic form). */
-const smoothRange = (e0: number, e1: number, x: number) => {
-  const t = clamp((x - e0) / (e1 - e0 || 1e-6));
-  return t * t * (3 - 2 * t);
-};
+import GlassPanel from "./GlassPanel";
+import { EPOCHS, EPOCH_COUNT as N } from "@/lib/cosmos/timeline";
+import { epochDelta, epochMod, epochYearsAgo, formatYears } from "@/lib/cosmos/format";
+import { OrbitEngine } from "@/lib/cosmos/engine-orbit";
 
 /**
- * CHRONOS 3D — WebGL time-dive (reliwebgl-style architecture)
- * ----------------------------------------------------------------
- * ONE fixed full-screen canvas renders every era as a 3D world you dive
- * into (engine3d.ts). Native scroll is only a *target*; a rAF loop glides
- * a virtual cursor toward it and drives the WebGL camera. The DOM carries
- * only the floating text panels + HUD — written per frame with transform /
- * opacity alone, so the whole experience stays on the GPU compositor.
+ * CHRONOS ∞ — the eternal time-ocean
+ * -----------------------------------
+ * You hang at the center of spacetime while every epoch drifts around you
+ * on an endless ring. There is no scrollbar and no end:
+ *  - wheel / drag / arrow keys push a virtual time cursor with momentum
+ *  - an idle current always flows — the universe never stops moving
+ *  - the ring wraps modulo the epoch count, so travel is literally infinite
+ *  - clicking a photograph pulls it to your face and raises the glasswork
+ *    window (animated shine) with that era's full story
  */
 
+const IDLE_DRIFT = 0.005; // epochs per second when untouched
+const WHEEL_GAIN = 0.0016; // epochs per wheel px
+const DRAG_GAIN = 0.0048; // epochs per drag px
+
 export default function CosmicExperience() {
-  const stateRef = useRef<EngineState>({
-    progress: 0,
-    velocity: 0,
-    speed: 0,
-    accent: hexToRgb(EPOCHS[0].accent),
-    accentCss: EPOCHS[0].accent,
-    reducedMotion: false,
-  });
-
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const engineRef = useRef<ChronosEngine | null>(null);
-  const panelRefs = useRef<(HTMLDivElement | null)[]>(EPOCHS.map(() => null));
+  const engineRef = useRef<OrbitEngine | null>(null);
 
-  // --- HUD refs ---
+  // virtual time cursor
+  const timeRef = useRef({ t: -0.9, target: -0.9, fling: 0 });
+
+  // focus state machine
+  const [focusIdx, setFocusIdx] = useState<number | null>(null);
+  const [showPanel, setShowPanel] = useState(false);
+  const focusRef = useRef<number | null>(null);
+  const openTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    focusRef.current = focusIdx;
+  }, [focusIdx]);
+
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [introGone, setIntroGone] = useState(false);
+
+  // HUD refs
   const yearValueRef = useRef<HTMLSpanElement | null>(null);
   const yearUnitRef = useRef<HTMLSpanElement | null>(null);
   const eraRef = useRef<HTMLSpanElement | null>(null);
   const warpRef = useRef<HTMLSpanElement | null>(null);
   const warpBarRef = useRef<HTMLDivElement | null>(null);
-  const barRef = useRef<HTMLDivElement | null>(null);
-  const introRef = useRef<HTMLDivElement | null>(null);
-  const outroRef = useRef<HTMLDivElement | null>(null);
-  const letterTopRef = useRef<HTMLDivElement | null>(null);
-  const letterBotRef = useRef<HTMLDivElement | null>(null);
-  const flashRef = useRef<HTMLDivElement | null>(null);
 
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [mounted, setMounted] = useState<Set<number>>(() => new Set([0, 1, 2]));
-
-  const jumpTo = useCallback((progress: number) => {
-    const max = document.documentElement.scrollHeight - window.innerHeight;
-    window.scrollTo({ top: progress * max, behavior: "smooth" });
-  }, []);
-
-  const restart = useCallback(() => {
-    window.scrollTo({ top: 0, behavior: "smooth" });
-  }, []);
-
-  const registerPanel = useCallback(
-    (i: number) => (el: HTMLDivElement | null) => {
-      panelRefs.current[i] = el;
-    },
-    []
-  );
-
-  /* ---------- WebGL engine lifecycle ---------- */
+  /* ---------- engine lifecycle ---------- */
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const isMobile = window.matchMedia("(max-width: 767px)").matches;
-    let engine: ChronosEngine | null = null;
+    let engine: OrbitEngine | null = null;
     try {
-      engine = new ChronosEngine(canvas, isMobile);
+      engine = new OrbitEngine(canvas, isMobile);
       engineRef.current = engine;
     } catch (e) {
-      // WebGL unavailable — the DOM journey (text, HUD) still works
       console.warn("WebGL init failed", e);
       return;
     }
+    // expose pick for diagnostics (dev only)
+    if (engine && process.env.NODE_ENV !== "production") {
+      (window as unknown as Record<string, unknown>).__chronosPick = (
+        nx: number,
+        ny: number
+      ) => engine?.pick(nx, ny) ?? -1;
+    }
+
     const onResize = () =>
       engine?.resize(window.innerWidth, window.innerHeight, window.devicePixelRatio || 1);
     onResize();
@@ -96,140 +81,226 @@ export default function CosmicExperience() {
     };
   }, []);
 
-  /* ---------- the cinematic loop ---------- */
+  /* ---------- focus helpers ---------- */
+  const openFocus = useCallback((i: number) => {
+    setIntroGone(true);
+    setFocusIdx(i);
+    engineRef.current?.setFocus(i);
+    if (openTimer.current) clearTimeout(openTimer.current);
+    openTimer.current = setTimeout(() => setShowPanel(true), 470);
+  }, []);
+
+  const closeFocus = useCallback(() => {
+    if (openTimer.current) {
+      clearTimeout(openTimer.current);
+      openTimer.current = null;
+    }
+    setShowPanel(false);
+    engineRef.current?.setFocus(null);
+    setFocusIdx(null);
+  }, []);
+
+  const jumpTo = useCallback((i: number) => {
+    setIntroGone(true);
+    const s = timeRef.current;
+    s.target = s.t + epochDelta(i, s.t);
+    s.fling = 0;
+  }, []);
+
+  /* ---------- input + the cinematic loop ---------- */
   useEffect(() => {
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    stateRef.current.reducedMotion = reduced;
-
-    let max = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
-
-    const onResize = () => {
-      max = Math.max(1, document.documentElement.scrollHeight - window.innerHeight);
-    };
-    window.addEventListener("resize", onResize);
-
-    // mouse parallax targets (fine pointers only)
-    let mxT = 0;
-    let myT = 0;
-    let mx = 0;
-    let my = 0;
-    const onMove = (e: MouseEvent) => {
-      mxT = (e.clientX / window.innerWidth) * 2 - 1;
-      myT = (e.clientY / window.innerHeight) * 2 - 1;
-    };
     const canParallax = window.matchMedia("(pointer: fine)").matches;
-    if (canParallax) window.addEventListener("mousemove", onMove, { passive: true });
 
-    const accentList = EPOCHS.map((e) => hexToRgb(e.accent));
-
-    let cur = window.scrollY;
-    let prevCur = cur;
+    let smxT = 0;
+    let smyT = 0;
+    let smx = 0;
+    let smy = 0;
     let last = performance.now();
     let raf = 0;
     let lastActive = -1;
-    let hintHidden = false;
-    // last-written DOM values to avoid redundant style/layout work
-    const panelCache: number[][] = EPOCHS.map(() => [-1, -1]);
+    let lastPickAt = 0;
+
+    // drag state
+    let dragging = false;
+    let moved = false;
+    let downX = 0;
+    let downY = 0;
+    let lastY = 0;
+    let lastMoveT = 0;
+    let dragVel = 0;
+
     const dom: Record<string, string> = {};
-    const setStyle = (
-      el: HTMLElement | null,
-      prop: string,
-      val: string,
-      key?: string
-    ) => {
-      if (!el) return;
-      const k = key ?? prop;
-      if (dom[k] === val) return;
-      dom[k] = val;
-      (el.style as unknown as Record<string, string>)[prop] = val;
-    };
     const setText = (el: HTMLElement | null, val: string, key: string) => {
       if (!el || dom[key] === val) return;
       dom[key] = val;
       el.textContent = val;
     };
+    const setStyle = (el: HTMLElement | null, prop: string, val: string, key: string) => {
+      if (!el || dom[key] === val) return;
+      dom[key] = val;
+      (el.style as unknown as Record<string, string>)[prop] = val;
+    };
 
+    /* ----- wheel: the time current ----- */
+    const onWheel = (e: WheelEvent) => {
+      if (focusRef.current !== null) return; // the glass window scrolls itself
+      e.preventDefault();
+      setIntroGone(true);
+      const d = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+      timeRef.current.target += d * WHEEL_GAIN;
+      timeRef.current.fling = 0;
+    };
+    window.addEventListener("wheel", onWheel, { passive: false });
+
+    /* ----- keys ----- */
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        closeFocus();
+        return;
+      }
+      if (focusRef.current !== null) return;
+      const s = timeRef.current;
+      if (e.key === "ArrowDown" || e.key === "PageDown" || e.key === " ") {
+        e.preventDefault();
+        s.target += 0.8;
+        s.fling = 0;
+        setIntroGone(true);
+      } else if (e.key === "ArrowUp" || e.key === "PageUp") {
+        e.preventDefault();
+        s.target -= 0.8;
+        s.fling = 0;
+        setIntroGone(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+
+    /* ----- pointer: drag to drift, tap to open ----- */
+    const canvas = canvasRef.current;
+    const onDown = (e: PointerEvent) => {
+      if (focusRef.current !== null) return;
+      dragging = true;
+      moved = false;
+      downX = e.clientX;
+      downY = e.clientY;
+      lastY = e.clientY;
+      lastMoveT = performance.now();
+      dragVel = 0;
+      if (canvas) canvas.style.cursor = "grabbing";
+    };
+
+    const onMove = (e: PointerEvent) => {
+      // parallax targets
+      if (canParallax && e.pointerType === "mouse") {
+        smxT = (e.clientX / window.innerWidth) * 2 - 1;
+        smyT = (e.clientY / window.innerHeight) * 2 - 1;
+      }
+      if (!dragging || focusRef.current !== null) return;
+      const now = performance.now();
+      const dy = e.clientY - lastY;
+      const dtm = Math.max(8, now - lastMoveT);
+      lastY = e.clientY;
+      lastMoveT = now;
+      if (!moved && Math.hypot(e.clientX - downX, e.clientY - downY) > 7) moved = true;
+      if (moved) {
+        setIntroGone(true);
+        timeRef.current.target -= dy * DRAG_GAIN;
+        dragVel = dragVel * 0.72 + (-dy * DRAG_GAIN) / (dtm / 1000) * 0.28;
+      }
+    };
+
+    const onUp = (e: PointerEvent) => {
+      if (focusRef.current !== null) return;
+      if (canvas) canvas.style.cursor = "";
+      if (!dragging) return;
+      dragging = false;
+      if (moved) {
+        // fling inertia
+        timeRef.current.fling = Math.max(-3.2, Math.min(3.2, dragVel * 0.5));
+      } else if (engineRef.current) {
+        // tap → pick a memory (duration-agnostic: stillness means intent)
+        const nx = (e.clientX / window.innerWidth) * 2 - 1;
+        const ny = -(e.clientY / window.innerHeight) * 2 + 1;
+        const hit = engineRef.current.pick(nx, ny);
+        if (hit >= 0) openFocus(hit);
+      }
+      dragVel = 0;
+    };
+
+    if (canvas) {
+      canvas.addEventListener("pointerdown", onDown);
+      window.addEventListener("pointermove", onMove, { passive: true });
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+    }
+
+    /* ----- hover raycast (fine pointers) ----- */
+    const onHoverMove = (e: MouseEvent) => {
+      if (focusRef.current !== null || !engineRef.current) return;
+      const now = performance.now();
+      if (now - lastPickAt < 70) return;
+      lastPickAt = now;
+      const nx = (e.clientX / window.innerWidth) * 2 - 1;
+      const ny = -(e.clientY / window.innerHeight) * 2 + 1;
+      const hit = engineRef.current.pick(nx, ny);
+      engineRef.current.setHover(hit);
+      if (canvas) canvas.style.cursor = hit >= 0 ? "pointer" : "grab";
+    };
+    if (canParallax) window.addEventListener("mousemove", onHoverMove, { passive: true });
+
+    /* ----- the loop ----- */
     const frame = (now: number) => {
       raf = requestAnimationFrame(frame);
       if (document.hidden) {
         last = now;
         return;
       }
-      const dt = Math.min(0.05, (now - last) / 1000);
+      const dt = Math.min(0.05, Math.max(0.001, (now - last) / 1000));
       last = now;
 
-      // ---- virtual cursor glide (the cinematic smoothing) ----
-      const target = Math.min(window.scrollY, max);
-      const k = reduced ? 1 : 1 - Math.exp(-dt * 5.5);
-      cur += (target - cur) * k;
-      if (Math.abs(target - cur) < 0.15) cur = target;
-      const velocity = (cur - prevCur) / Math.max(dt, 1e-4) / 60; // px per 60fps frame
-      prevCur = cur;
-      const speed = Math.abs(velocity);
+      const s = timeRef.current;
+      const focused = focusRef.current !== null;
 
-      const progress = clamp(cur / max);
-      const s = stateRef.current;
-      s.progress = progress;
-      s.velocity = velocity;
-      s.speed = speed;
-      if (process.env.NODE_ENV !== "production") {
-        const w = window as unknown as Record<string, number>;
-        w.__chronosFrames = (w.__chronosFrames || 0) + 1;
-        w.__chronosProgress = progress;
+      // momentum + the idle current (the ocean never stops — but holds
+      // perfectly still while your finger/mouse is down on a memory)
+      if (!focused && !dragging) {
+        s.target += s.fling * dt;
+        s.fling *= Math.exp(-dt * 2.6);
+        if (Math.abs(s.fling) < 0.004) s.fling = 0;
+        if (!reduced) s.target += IDLE_DRIFT * dt;
       }
 
-      // ---- WebGL world ----
+      // cinematic glide toward the target
+      const k = reduced ? 1 : 1 - Math.exp(-dt * 4.6);
+      s.t += (s.target - s.t) * k;
+      if (Math.abs(s.target - s.t) < 0.0004) s.t = s.target;
+
+      const gap = Math.abs(s.target - s.t);
+      const speedN = Math.min(1, gap / 1.4);
+
+      // smoothed parallax
       if (canParallax) {
         const pk = Math.min(1, dt * 3.2);
-        mx += (mxT - mx) * pk;
-        my += (myT - my) * pk;
-      } else {
-        mx = 0;
-        my = 0;
+        smx += (smxT - smx) * pk;
+        smy += (smyT - smy) * pk;
       }
-      const warp = Math.min(1, speed / (window.innerHeight * 0.075));
-      engineRef.current?.update({ progress, warp, pointerX: mx, pointerY: my, reduced }, now);
 
-      // ---- era accent interpolation ----
-      let ai = 0;
-      while (ai < ANCHORS.length - 1 && ANCHORS[ai + 1] < progress) ai++;
-      const a0 = ANCHORS[ai];
-      const a1 = ANCHORS[Math.min(ai + 1, ANCHORS.length - 1)];
-      const u = clamp((progress - a0) / Math.max(a1 - a0, 1e-6));
-      const c = mixRgb(accentList[ai], accentList[Math.min(ai + 1, accentList.length - 1)], u);
-      s.accent = c;
-      s.accentCss = rgba(c, 1);
+      engineRef.current?.update(
+        { time: s.t, speed: speedN, pointerX: smx, pointerY: smy, reduced },
+        now
+      );
 
       // ---- odometer ----
-      const f = formatYears(yearsAgoAt(progress));
+      const f = formatYears(epochYearsAgo(s.t));
       setText(yearValueRef.current, f.value, "yv");
       setText(yearUnitRef.current, f.unit, "yu");
-      if (yearValueRef.current) {
-        const ts = `0 2px 26px rgba(0,0,0,0.92), 0 0 ${18 + Math.min(70, speed)}px ${rgba(c, 0.32)}`;
-        setStyle(yearValueRef.current, "textShadow", ts, "yts");
-      }
 
-      // ---- era chip + active stop ----
-      let nearest = 0;
-      let nd = Infinity;
-      for (let i = 0; i < ANCHORS.length; i++) {
-        const d = Math.abs(progress - ANCHORS[i]);
-        if (d < nd) {
-          nd = d;
-          nearest = i;
-        }
-      }
+      // ---- era chip + active memory ----
+      const nearest = ((Math.round(epochMod(s.t)) % N) + N) % N;
+      const dist = Math.abs(epochDelta(nearest, s.t));
+      const holding = dist < 0.42;
       if (eraRef.current) {
-        const atStart = progress < INTRO_END * 0.8 && nearest === 0;
-        const atEnd = progress > OUTRO_START + 0.02 && nearest === EPOCHS.length - 1;
-        const holding = nd < SPACING * 0.3 || atStart || atEnd;
-        const compact = window.innerWidth < 640;
-        const eraText = holding
-          ? EPOCHS[nearest].era
-          : compact
-            ? "IN TRANSIT"
-            : "IN TRANSIT · LIGHT SPEED";
-        setText(eraRef.current, eraText, "era");
+        setText(eraRef.current, holding ? EPOCHS[nearest].era : "DRIFTING · THE STREAM", "era");
         setStyle(
           eraRef.current,
           "color",
@@ -244,182 +315,107 @@ export default function CosmicExperience() {
         );
       }
 
-      // ---- warp meter ----
-      const cFrac = Math.min(0.999, speed / (window.innerHeight * 0.085));
-      setText(
-        warpRef.current,
-        cFrac > 0.006 ? `${cFrac.toFixed(2)} c` : "ORBIT HOLD",
-        "warp"
-      );
-      if (warpRef.current) {
-        const wc = cFrac > 0.6 ? "#fda4af" : "";
-        setStyle(warpRef.current, "color", wc, "warpC");
-      }
+      // ---- flow meter ----
+      const cFrac = Math.min(0.999, speedN);
+      setText(warpRef.current, cFrac > 0.008 ? `${cFrac.toFixed(2)} c` : "ORBIT HOLD", "warp");
       if (warpBarRef.current) {
-        setStyle(
-          warpBarRef.current,
-          "transform",
-          `scaleX(${Math.min(1, cFrac).toFixed(3)})`,
-          "warpBar"
-        );
+        setStyle(warpBarRef.current, "transform", `scaleX(${cFrac.toFixed(3)})`, "warpBar");
       }
 
-      // ---- hairline progress ----
-      if (barRef.current) {
-        setStyle(barRef.current, "transform", `scaleX(${progress.toFixed(4)})`, "bar");
-      }
-
-      // ---- cinematic letterbox slides in at warp ----
-      const vNorm = warp;
-      if (letterTopRef.current) {
-        setStyle(
-          letterTopRef.current,
-          "transform",
-          `translateY(${((vNorm - 1) * 100).toFixed(1)}%)`,
-          "lt"
-        );
-      }
-      if (letterBotRef.current) {
-        setStyle(
-          letterBotRef.current,
-          "transform",
-          `translateY(${((1 - vNorm) * 100).toFixed(1)}%)`,
-          "lb"
-        );
-      }
-      if (flashRef.current) {
-        const flash = Math.max(0, vNorm - 0.72) * 0.28;
-        setStyle(flashRef.current, "opacity", Math.min(0.14, flash).toFixed(3), "fl");
-      }
-
-      // ---- intro ----
-      if (introRef.current) {
-        const o = 1 - smoothstep(progress / (INTRO_END * 0.8));
-        setStyle(introRef.current, "opacity", o.toFixed(3), "inO");
-        setStyle(
-          introRef.current,
-          "transform",
-          `translate3d(0, ${((1 - o) * -46).toFixed(1)}px, 0) scale(${(1 + (1 - o) * 0.08).toFixed(4)})`,
-          "inT"
-        );
-      }
-
-      // ---- scroll hint ----
-      const hintEl = document.getElementById("scroll-hint");
-      if (hintEl) {
-        if (!hintHidden && progress > 0.018) {
-          hintEl.style.opacity = "0";
-          hintHidden = true;
-        } else if (hintHidden && progress <= 0.012) {
-          hintEl.style.opacity = "1";
-          hintHidden = false;
-        }
-      }
-
-      // ---- outro ----
-      if (outroRef.current) {
-        const o = smoothstep((progress - OUTRO_START) / 0.03);
-        setStyle(outroRef.current, "opacity", o.toFixed(3), "outO");
-        setStyle(outroRef.current, "pointerEvents", o > 0.6 ? "auto" : "none", "outP");
-        setStyle(
-          outroRef.current,
-          "transform",
-          `translate3d(0, ${((1 - o) * 30).toFixed(1)}px, 0)`,
-          "outT"
-        );
-      }
-
-      // ---- floating text panels (transform/opacity only) ----
-      // sweep ALL panels: the per-panel value cache makes hidden-writes
-      // one-shot, and it guarantees no stale visible panel after rail jumps
-      for (let i = 0; i < EPOCHS.length; i++) {
-        const el = panelRefs.current[i];
-        if (!el) continue;
-        const phase = (progress - ANCHORS[i]) / SPACING;
-        const alpha =
-          smoothRange(-0.148, -0.102, phase) * (1 - smoothRange(0.102, 0.148, phase));
-        const aR = Math.round(alpha * 100) / 100;
-        if (Math.abs(aR - panelCache[i][0]) < 0.005) continue;
-        panelCache[i][0] = aR;
-        const vis = aR > 0.004;
-        el.style.visibility = vis ? "visible" : "hidden";
-        el.style.opacity = aR.toFixed(3);
-        const y = (1 - alpha) * 28;
-        const sc = 0.985 + 0.015 * alpha;
-        el.style.transform = `translate3d(0, ${y.toFixed(1)}px, 0) scale(${sc.toFixed(4)})`;
-        const card = el.firstElementChild?.firstElementChild as HTMLElement | null;
-        if (card) card.style.pointerEvents = alpha > 0.45 ? "auto" : "none";
-      }
-
-      // ---- react state (only on stop change) ----
+      // ---- react state on change only ----
       if (nearest !== lastActive) {
         lastActive = nearest;
         setActiveIndex(nearest);
-        setMounted((prev) => {
-          const next = new Set(prev);
-          for (let d = -2; d <= 2; d++) {
-            const i = nearest + d;
-            if (i >= 0 && i < EPOCHS.length) next.add(i);
-          }
-          return next.size !== prev.size ? next : prev;
-        });
       }
     };
 
     raf = requestAnimationFrame(frame);
+
     return () => {
       cancelAnimationFrame(raf);
-      window.removeEventListener("resize", onResize);
-      if (canParallax) window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("wheel", onWheel);
+      window.removeEventListener("keydown", onKey);
+      if (canvas) {
+        canvas.removeEventListener("pointerdown", onDown);
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+      }
+      if (canParallax) window.removeEventListener("mousemove", onHoverMove);
     };
-  }, []);
+  }, [openFocus, closeFocus]);
+
+  const focusEpoch = focusIdx !== null ? EPOCHS[focusIdx] : null;
 
   return (
     <main className="bg-[#020107] text-foreground">
-      {/* scroll track — the only in-flow element; defines journey length */}
-      <div aria-hidden="true" className="h-[2600svh] w-full" />
-
-      {/* THE 3D WORLD — one fixed WebGL canvas */}
+      {/* THE TIME-OCEAN — one fixed WebGL canvas */}
       <canvas
         ref={canvasRef}
-        aria-label="Cinematic 3D journey through 13.8 billion years"
+        aria-label="An infinite 3D ocean of floating epoch photographs — drag to travel through time, click one to open its story"
         role="img"
-        className="fixed inset-0 z-10 h-full w-full"
+        className="fixed inset-0 z-10 h-full w-full cursor-grab touch-none"
       />
 
-      {/* floating readable text */}
-      <TextLayer mounted={mounted} registerPanel={registerPanel} />
-
-      {/* film grain + vignette scrims */}
-      <Atmosphere />
-
-      {/* warp letterbox + hyperspace flash */}
-      <div aria-hidden="true" className="pointer-events-none fixed inset-0 z-[16]">
-        <div
-          ref={letterTopRef}
-          className="absolute inset-x-0 top-0 h-[3.4vh] bg-black"
-          style={{ transform: "translateY(-100%)" }}
-        />
-        <div
-          ref={letterBotRef}
-          className="absolute inset-x-0 bottom-0 h-[3.4vh] bg-black"
-          style={{ transform: "translateY(100%)" }}
-        />
-        <div ref={flashRef} className="absolute inset-0 bg-white opacity-0" />
-      </div>
+      {/* film grain + vignette */}
+      <div aria-hidden="true" className="chronos-grain pointer-events-none fixed inset-0 z-[14]" />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none fixed inset-0 z-[14]"
+        style={{
+          background:
+            "radial-gradient(ellipse at center, transparent 52%, rgba(0,0,0,0.42) 100%)",
+        }}
+      />
 
       <TimeHUD
         activeIndex={activeIndex}
+        focusActive={focusIdx !== null}
         yearValueRef={yearValueRef}
         yearUnitRef={yearUnitRef}
         eraRef={eraRef}
         warpRef={warpRef}
         warpBarRef={warpBarRef}
-        barRef={barRef}
         onJump={jumpTo}
       />
-      <Intro introRef={introRef} />
-      <Outro outroRef={outroRef} onRestart={restart} />
+
+      {/* intro — dissolves on first touch of the current */}
+      <div
+        aria-hidden={introGone}
+        className={`pointer-events-none fixed inset-0 z-30 flex flex-col items-center justify-center px-6 text-center transition-all duration-1000 ${
+          introGone ? "opacity-0 blur-md" : "opacity-100"
+        }`}
+      >
+        <div
+          aria-hidden="true"
+          className="absolute inset-0"
+          style={{
+            background:
+              "radial-gradient(ellipse 62% 44% at 50% 50%, rgba(2,1,7,0.78) 0%, rgba(2,1,7,0.35) 55%, transparent 100%)",
+          }}
+        />
+        <p className="relative font-mono text-[10px] uppercase tracking-[0.5em] text-white/45 md:text-xs">
+          You are suspended in the stream of time
+        </p>
+        <h1 className="chronos-title-glow relative mt-4 text-5xl font-bold tracking-tight text-white md:text-7xl">
+          CHRONOS&nbsp;∞
+        </h1>
+        <p className="relative mt-4 max-w-md font-mono text-[10px] uppercase leading-5 tracking-[0.3em] text-white/40 md:text-[11px]">
+          13.8 billion years orbit you as floating memories
+          <br />
+          Scroll to drift · Click a memory to open its window
+        </p>
+      </div>
+
+      {/* the glasswork window */}
+      {showPanel && focusEpoch && (
+        <GlassPanel
+          epoch={focusEpoch}
+          index={focusIdx ?? 0}
+          total={N}
+          onClose={closeFocus}
+        />
+      )}
     </main>
   );
 }

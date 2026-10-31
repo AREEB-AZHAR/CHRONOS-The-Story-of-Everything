@@ -122,12 +122,24 @@
   }
 }
 
-/* ---- CHRONOS cinematic layer ---- */
 
-html {
-  scrollbar-width: none;
-  overscroll-behavior-y: none;
+/* ============================================================
+   CHRONOS ∞ — 4D spacetime edition (v2 sheen build)
+   ============================================================ */
+
+html,
+body {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  touch-action: none;
   scroll-behavior: auto;
+}
+
+body {
+  background: #020107;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
 body::-webkit-scrollbar,
@@ -135,87 +147,192 @@ html::-webkit-scrollbar {
   display: none;
 }
 
-body {
-  background: #020107;
-  overscroll-behavior: none;
-  -webkit-font-smoothing: antialiased;
-}
-
 ::selection {
-  background: rgba(244, 169, 69, 0.35);
+  background: rgba(110, 231, 183, 0.3);
   color: #fff;
 }
 
-/* film grain overlay */
-.chronos-grain {
-  pointer-events: none;
-  opacity: 0.055;
-  mix-blend-mode: overlay;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  background-size: 180px 180px;
-  animation: grain-jitter 0.9s steps(4) infinite;
+/* ---------------- cinematic vignette ---------------- */
+.vignette {
+  background:
+    radial-gradient(120% 90% at 50% 50%, transparent 55%, rgba(0, 0, 0, 0.42) 100%),
+    linear-gradient(to bottom, rgba(0, 0, 0, 0.28), transparent 14%, transparent 86%, rgba(0, 0, 0, 0.34));
 }
 
-@keyframes grain-jitter {
-  0% { transform: translate(0, 0); }
-  25% { transform: translate(-18px, 12px); }
-  50% { transform: translate(14px, -16px); }
-  75% { transform: translate(-10px, -8px); }
-  100% { transform: translate(12px, 14px); }
+/* ---------------- slow orbital spin ---------------- */
+.spin-slow {
+  animation: spin-orbit 9s linear infinite;
 }
-
-.chronos-bounce {
-  display: inline-block;
-  animation: chronos-bounce-y 1.6s ease-in-out infinite;
-}
-
-@keyframes chronos-bounce-y {
-  0%, 100% { transform: translateY(0); opacity: 0.5; }
-  50% { transform: translateY(7px); opacity: 1; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .chronos-grain {
-    animation: none;
-  }
-  .chronos-bounce {
-    animation: none;
-  }
-  .chronos-float,
-  .chronos-drift {
-    animation: none !important;
+@keyframes spin-orbit {
+  to {
+    transform: rotate(360deg);
   }
 }
 
-/* ---- CHRONOS 3D ---- */
-
-/* floating glass text panels breathe inside the 3D world */
-.chronos-float {
-  animation: chronos-float-y 8s ease-in-out infinite;
+/* ---------------- glass pills (buttons) ---------------- */
+.glass-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.07);
+  backdrop-filter: blur(14px) saturate(150%);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+  padding: 0.5rem 1rem;
+  transition:
+    background 0.25s ease,
+    border-color 0.25s ease,
+    box-shadow 0.25s ease;
+  cursor: pointer;
+}
+.glass-pill:hover {
+  background: rgba(255, 255, 255, 0.13);
+  border-color: rgba(255, 255, 255, 0.3);
+  box-shadow: 0 0 24px rgba(110, 231, 183, 0.12);
 }
 
-@keyframes chronos-float-y {
-  0%,
+/* ---------------- the glasswork window ---------------- */
+.glass-panel {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.03) 45%, rgba(255, 255, 255, 0.07) 100%);
+  backdrop-filter: blur(26px) saturate(160%);
+  -webkit-backdrop-filter: blur(26px) saturate(160%);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.04);
+}
+
+/* ---------------- moving animated shine ---------------- */
+.sheen {
+  background: linear-gradient(
+    115deg,
+    transparent 32%,
+    rgba(255, 255, 255, 0.045) 42%,
+    rgba(255, 255, 255, 0.16) 49%,
+    rgba(110, 231, 183, 0.12) 52%,
+    rgba(255, 255, 255, 0.045) 60%,
+    transparent 70%
+  );
+  background-size: 260% 100%;
+  background-position: 130% 0;
+  animation: sheen-sweep 5.2s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+  mix-blend-mode: screen;
+}
+@keyframes sheen-sweep {
+  0% {
+    background-position: 130% 0;
+  }
+  55%,
   100% {
-    transform: translateY(-5px);
-  }
-  50% {
-    transform: translateY(6px);
+    background-position: -130% 0;
   }
 }
 
-/* slim scrollbar inside floating panels */
-.chronos-panel-scroll {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+/* secondary micro-shine along the top hairline */
+.glass-panel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.07) 46%,
+    rgba(255, 255, 255, 0.12) 50%,
+    rgba(255, 255, 255, 0.07) 54%,
+    transparent 70%
+  );
+  background-size: 300% 300%;
+  animation: panel-veil 11s ease-in-out infinite alternate;
 }
-.chronos-panel-scroll::-webkit-scrollbar {
+@keyframes panel-veil {
+  from {
+    background-position: 0% 0%;
+  }
+  to {
+    background-position: 100% 100%;
+  }
+}
+
+/* ---------------- slim custom scrollbar ---------------- */
+.cosmos-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+.cosmos-scroll::-webkit-scrollbar {
   width: 5px;
 }
-.chronos-panel-scroll::-webkit-scrollbar-track {
+.cosmos-scroll::-webkit-scrollbar-track {
   background: transparent;
 }
-.chronos-panel-scroll::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.2);
+.cosmos-scroll::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
   border-radius: 999px;
+}
+.cosmos-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(110, 231, 183, 0.4);
+}
+
+/* ---------------- editorial block (bottom-left) ---------------- */
+.era-slide {
+  animation: era-in 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes era-in {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+.era-title {
+  text-shadow:
+    0 2px 30px rgba(0, 0, 0, 0.85),
+    0 0 60px rgba(0, 0, 0, 0.5);
+}
+
+/* ---------------- year counter ---------------- */
+.year-counter {
+  text-shadow:
+    0 0 22px rgba(110, 231, 183, 0.35),
+    0 2px 18px rgba(0, 0, 0, 0.8);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* ---------------- chip + fact list entrance ---------------- */
+.chip {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.fact {
+  animation: fact-in 0.5s ease both;
+}
+@keyframes fact-in {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+/* ---------------- reduced motion ---------------- */
+@media (prefers-reduced-motion: reduce) {
+  .spin-slow,
+  .sheen,
+  .glass-panel::after,
+  .era-slide,
+  .fact {
+    animation: none !important;
+  }
 }

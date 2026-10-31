@@ -1,23 +1,17 @@
-/* Converts PNGs in public/cosmos to webp q80 and removes the originals */
 import sharp from "sharp";
-import fs from "fs";
-import path from "path";
+import { readdir, mkdir } from "fs/promises";
 
-const OUT = path.join(process.cwd(), "public", "cosmos");
+const SRC = "cosmos-raw";
+const DST = "public/cosmos";
+await mkdir(DST, { recursive: true });
 
-async function main() {
-  const files = fs.readdirSync(OUT).filter((f) => f.endsWith(".png"));
-  for (const f of files) {
-    const src = path.join(OUT, f);
-    const dst = path.join(OUT, f.replace(/\.png$/, ".webp"));
-    await sharp(src).webp({ quality: 80 }).toFile(dst);
-    fs.unlinkSync(src);
-    console.log(`webp ${f}`);
-  }
-  console.log("OPTIMIZE DONE");
+const files = (await readdir(SRC)).filter((f) => f.endsWith(".png"));
+for (const f of files) {
+  const out = f.replace(".png", ".jpg");
+  await sharp(`${SRC}/${f}`)
+    .resize({ width: 1152, withoutEnlargement: true })
+    .jpeg({ quality: 82, mozjpeg: true, progressive: true })
+    .toFile(`${DST}/${out}`);
+  console.log("ok", out);
 }
-
-main().catch((e) => {
-  console.error("FATAL", e);
-  process.exit(1);
-});
+console.log("DONE", files.length, "images");

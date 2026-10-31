@@ -1,0 +1,209 @@
+"use client";
+
+import { useEffect, useRef } from "react";
+import type { TimelineEvent } from "@/data/timeline";
+import { TOTAL_EVENTS } from "@/data/timeline";
+
+export interface HudRefProps {
+  yearBigRef: React.RefObject<HTMLSpanElement | null>;
+  yearUnitRef: React.RefObject<HTMLSpanElement | null>;
+  progressBarRef: React.RefObject<HTMLDivElement | null>;
+}
+
+export function formatYear(ya: number): { big: string; unit: string } {
+  if (ya >= 1_000_000_000) {
+    const v = ya / 1_000_000_000;
+    return { big: v.toFixed(2), unit: "BILLION YEARS AGO" };
+  }
+  if (ya >= 1_000_000) {
+    return { big: Math.round(ya / 1_000_000).toLocaleString(), unit: "MILLION YEARS AGO" };
+  }
+  if (ya >= 10_000) {
+    return { big: Math.round(ya).toLocaleString(), unit: "YEARS AGO" };
+  }
+  if (ya >= 2_027) {
+    return { big: (2026 - Math.round(ya)).toLocaleString(), unit: "BCE" };
+  }
+  if (ya >= 1) {
+    return { big: (2026 - Math.round(ya)).toLocaleString(), unit: "CE" };
+  }
+  return { big: "2026", unit: "PRESENT DAY" };
+}
+
+interface HudProps {
+  era: TimelineEvent;
+  yearBigRef: React.RefObject<HTMLSpanElement | null>;
+  yearUnitRef: React.RefObject<HTMLSpanElement | null>;
+  progressBarRef: React.RefObject<HTMLDivElement | null>;
+  /** true while a moment is selected — fades the mobile year block behind the sheet */
+  selectionActive: boolean;
+  onOpenEras: () => void;
+  onOpenAbout: () => void;
+  onBackToStart: () => void;
+}
+
+export default function Hud({
+  era,
+  yearBigRef,
+  yearUnitRef,
+  progressBarRef,
+  selectionActive,
+  onOpenEras,
+  onOpenAbout,
+  onBackToStart,
+}: HudProps) {
+  const idxRef = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (idxRef.current) {
+      idxRef.current.textContent = String(era.index).padStart(2, "0");
+    }
+  }, [era.index]);
+
+  return (
+    <div className="pointer-events-none fixed inset-0 z-10 select-none">
+      {/* vignette for cinema feel */}
+      <div className="vignette absolute inset-0" />
+
+      {/* ============ top bar ============ */}
+      <header className="absolute inset-x-0 top-0 flex items-start justify-between gap-4 p-5 sm:p-7">
+        {/* logo */}
+        <div className="flex items-center gap-3">
+          <span className="logo-orbit relative grid size-9 place-items-center">
+            <span className="absolute inset-0 rounded-full border border-white/25" />
+            <span className="absolute inset-0 rounded-full border-t-[1.5px] border-emerald-300/90 spin-slow" />
+            <span className="size-[5px] rounded-full bg-emerald-300 shadow-[0_0_10px_2px_rgba(110,231,183,0.8)]" />
+          </span>
+          <div className="leading-none">
+            <p className="font-mono text-sm font-bold tracking-[0.35em] text-white">CHRONOS</p>
+            <p className="mt-1 font-mono text-[9px] tracking-[0.3em] text-white/40">
+              ATLAS OF EVERYTHING
+            </p>
+          </div>
+        </div>
+
+        {/* meta — hidden on small screens */}
+        <div className="mt-1 hidden items-start gap-12 md:flex">
+          <div>
+            <p className="font-mono text-[9px] uppercase tracking-[0.25em] text-white/35">
+              Currently
+            </p>
+            <p className="mt-1.5 font-mono text-xs tracking-wider text-white/90">
+              {era.title}
+            </p>
+          </div>
+          <div>
+            <p className="font-mono text-[9px] uppercase tracking-[0.25em] text-white/35">
+              Position
+            </p>
+            <p className="mt-1.5 font-mono text-xs tracking-wider text-white/90">
+              Centre of Spacetime
+            </p>
+          </div>
+        </div>
+
+        {/* nav status */}
+        <nav className="pointer-events-auto mt-1 hidden items-center gap-5 sm:flex">
+          <span className="font-mono text-[9px] uppercase tracking-[0.25em] text-white/35">
+            Navigation
+          </span>
+          <button
+            onClick={onOpenEras}
+            className="font-mono text-xs tracking-wider text-emerald-300 transition-colors hover:text-emerald-200"
+          >
+            Eras
+          </button>
+          <button
+            onClick={onOpenAbout}
+            className="font-mono text-xs tracking-wider text-white/60 transition-colors hover:text-white"
+          >
+            About
+          </button>
+        </nav>
+
+        {/* mobile nav */}
+        <div className="pointer-events-auto flex items-center gap-4 sm:hidden">
+          <button
+            onClick={onOpenEras}
+            className="glass-pill px-3 py-1.5 font-mono text-[10px] tracking-widest text-emerald-300"
+          >
+            ERAS
+          </button>
+          <button
+            onClick={onOpenAbout}
+            className="glass-pill px-3 py-1.5 font-mono text-[10px] tracking-widest text-white/70"
+          >
+            ABOUT
+          </button>
+        </div>
+      </header>
+
+      {/* ============ bottom-left editorial block ============ */}
+      <div className="absolute bottom-24 left-5 max-w-[70vw] sm:bottom-8 sm:left-7 sm:max-w-md">
+        <div key={era.id} className="era-slide">
+          <p className="font-mono text-[10px] tracking-[0.3em] text-emerald-300/90">
+            <span ref={idxRef} /> / {TOTAL_EVENTS}
+          </p>
+          <h2 className="era-title mt-2 font-display text-3xl font-light italic leading-tight text-white sm:text-4xl">
+            {era.title}
+          </h2>
+          <p className="mt-2 hidden font-mono text-[10px] tracking-[0.2em] text-white/45 sm:block">
+            {era.category} · {era.yearLabel.toUpperCase()}
+          </p>
+        </div>
+      </div>
+
+      {/* ============ bottom-right ============ */}
+      <div className="absolute bottom-24 right-5 hidden flex-col items-end gap-3 sm:bottom-8 sm:right-7 sm:flex">
+        <p className="font-mono text-[10px] tracking-[0.25em] text-white/40">
+          {TOTAL_EVENTS} EVENTS · ∞ STREAM
+        </p>
+        <button onClick={onBackToStart} className="glass-pill pointer-events-auto group flex items-center gap-2.5">
+          <span className="grid size-5 place-items-center rounded-full bg-white/10 transition-colors group-hover:bg-white/20">
+            <svg width="8" height="8" viewBox="0 0 8 8" fill="none" className="rotate-180">
+              <path d="M1 0.5L7 4L1 7.5V0.5Z" fill="white" />
+            </svg>
+          </span>
+          <span className="font-mono text-[10px] tracking-[0.2em] text-white/85">
+            BACK TO THE BIG BANG
+          </span>
+        </button>
+        <p className="font-mono text-[9px] tracking-[0.2em] text-white/30">
+          SCROLL · DRAG · CLICK A MOMENT
+        </p>
+      </div>
+
+      {/* ============ bottom-centre: year counter ============ */}
+      <div
+        className={`absolute inset-x-0 bottom-5 flex flex-col items-center gap-2 px-4 transition-opacity duration-500 sm:bottom-7 sm:opacity-100 ${
+          selectionActive ? "opacity-0" : "opacity-100"
+        }`}
+      >
+        <div className="flex items-baseline gap-2.5">
+          <span
+            ref={yearBigRef}
+            className="year-counter font-mono text-4xl font-bold tabular-nums tracking-tight text-white sm:text-5xl"
+          >
+            13.80
+          </span>
+          <span
+            ref={yearUnitRef}
+            className="font-mono text-[10px] tracking-[0.3em] text-emerald-300/90 sm:text-xs"
+          >
+            BILLION YEARS AGO
+          </span>
+        </div>
+        {/* loop progress */}
+        <div className="relative h-px w-48 overflow-hidden rounded bg-white/12 sm:w-64">
+          <div
+            ref={progressBarRef}
+            className="absolute inset-y-0 left-0 w-0 bg-gradient-to-r from-emerald-300 to-teal-200 shadow-[0_0_8px_rgba(110,231,183,0.9)]"
+          />
+        </div>
+        <p className="font-mono text-[8px] tracking-[0.35em] text-white/30">
+          THE LOOP · BIG BANG → NOW → BIG BANG
+          <span className="sm:hidden"> · TAP A MOMENT</span>
+        </p>
+      </div>
+    </div>
+  );
+}
