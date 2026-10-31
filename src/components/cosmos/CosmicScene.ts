@@ -195,7 +195,7 @@ export class CosmicScene {
   private scene = new THREE.Scene();
   private camera: THREE.PerspectiveCamera;
   private world = new THREE.Group();
-  private clock = new THREE.Clock();
+  private timer = new THREE.Timer();
 
   private canvas: HTMLCanvasElement;
   private events: TimelineEvent[];
@@ -319,7 +319,7 @@ export class CosmicScene {
     void this.loadAssets();
 
     this.bindEvents();
-    this.clock.start();
+    this.timer.reset();
     this.loop();
 
     // redraw the floating title once webfonts are ready
@@ -363,15 +363,34 @@ export class CosmicScene {
     const ordered = await Promise.all(this.events.map((e) => loadOne(e.image)));
     if (this.disposed) return;
 
+    // Pre-upload all textures to GPU during loading screen to eliminate runtime scroll hitching
+    ordered.forEach((tex) => {
+      if (tex) {
+        try {
+          this.renderer.initTexture(tex);
+        } catch {
+          /* ignore */
+        }
+      }
+    });
+
     this.buildCards(ordered);
     this.buildShards(ordered);
+
+    // Warm up shader compilation ahead of time
+    try {
+      this.renderer.compile(this.scene, this.camera);
+    } catch {
+      /* ignore */
+    }
+
     this.ready = true;
     this.cb.onReady?.();
   }
 
   /* ================= world building ================= */
 
-  private buildCards(texs: (THREE.Texture | undefined)[]) {
+  private buildCards(texs: (THREE.Texture | null | undefined)[]) {
     const rand = mulberry32(1337);
     const geo = new THREE.PlaneGeometry(CARD_W, CARD_H, 1, 1);
 
@@ -419,17 +438,17 @@ export class CosmicScene {
     });
   }
 
-  private buildShards(texs: (THREE.Texture | undefined)[]) {
-    // 4x? atlas: 6 cols x 5 rows over 2048px
+  private buildShards(texs: (THREE.Texture | null | undefined)[]) {
+    // 4x? atlas: 6 cols x 5 rows over 1024px
     const COLS = 6,
       ROWS = 5;
     const cv = document.createElement("canvas");
-    cv.width = 2048;
-    cv.height = 2048;
+    cv.width = 1024;
+    cv.height = 1024;
     const ctx = cv.getContext("2d");
     if (!ctx) return;
-    const cw = 2048 / COLS;
-    const ch = 2048 / ROWS;
+    const cw = 1024 / COLS;
+    const ch = 1024 / ROWS;
     texs.forEach((t, i) => {
       if (!t || !t.image) return;
       const col = i % COLS;
@@ -444,6 +463,11 @@ export class CosmicScene {
     atlas.colorSpace = THREE.SRGBColorSpace;
     atlas.generateMipmaps = true;
     atlas.minFilter = THREE.LinearMipmapLinearFilter;
+    try {
+      this.renderer.initTexture(atlas);
+    } catch {
+      /* ignore */
+    }
 
     const rand = mulberry32(4242);
     const COUNT = 150;
@@ -650,9 +674,8 @@ export class CosmicScene {
   /* ================= input ================= */
 
   private onWheel = (e: WheelEvent) => {
-    e.preventDefault();
     if (this.inputLocked) return;
-    const mult = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 100 : 1;
+    const mult = e.deltaMode === 1 ? 24 : e.deltaMode === 2 ? 100 : 1;
     this.targetScroll += e.deltaY * 0.052 * mult;
     this.lastInputAt = performance.now();
   };
@@ -760,7 +783,7 @@ export class CosmicScene {
   };
 
   private bindEvents() {
-    window.addEventListener("wheel", this.onWheel, { passive: false });
+    window.addEventListener("wheel", this.onWheel, { passive: true });
     window.addEventListener("pointermove", this.onPointerMove, { passive: true });
     window.addEventListener("pointerdown", this.onPointerDown, { passive: true });
     window.addEventListener("pointerup", this.onPointerUp, { passive: true });
@@ -819,11 +842,12 @@ export class CosmicScene {
   private tmpColor = new THREE.Color();
   private static Z_AXIS = new THREE.Vector3(0, 0, 1);
 
-  private loop = () => {
+  private loop = (timestamp?: number) => {
     if (this.disposed) return;
     this.raf = requestAnimationFrame(this.loop);
-    const dt = Math.min(this.clock.getDelta(), 0.05);
-    const t = this.clock.elapsedTime;
+    this.timer.update(timestamp);
+    const dt = Math.min(this.timer.getDelta(), 0.05);
+    const t = this.timer.getElapsed();
     this.frameCount++;
 
     /* ---- adaptive quality: one-time downgrade for weak GPUs ---- */
@@ -845,7 +869,7 @@ export class CosmicScene {
     }
 
     /* ---- idle auto-drift: the stream carries you, lingering at each station ---- */
-    const idle = performance.now() - this.lastInputAt > 3500;
+    const idle = performance.now() - this.lastInputAt > 4000;
     if (idle && !this.inputLocked && this.selectedIdx < 0 && this.ready && this.begun) {
       const fDock = this.scroll - FOCUS_Z;
       const nearestDock = Math.round(fDock / GAP) * GAP;
@@ -856,27 +880,29 @@ export class CosmicScene {
       if (!docked || lingered) this.targetScroll += 2.1 * dt;
     }
 
-    /* ---- magnetic docking: ease onto the nearest station when resting ---- */
+    /* ---- magnetic docking: gently settle onto the nearest station when fully resting ---- */
     if (
       this.ready &&
       !this.inputLocked &&
       this.selectedIdx < 0 &&
-      performance.now() - this.lastInputAt > 420 &&
-      Math.abs(this.targetScroll - this.scroll) < 0.9
+      Math.abs(this.velocity) < 0.6 &&
+      performance.now() - this.lastInputAt > 1200 &&
+      Math.abs(this.targetScroll - this.scroll) < 0.6
     ) {
       const f = this.scroll - FOCUS_Z;
       const nearest = Math.round(f / GAP) * GAP;
       const delta = nearest - f;
-      if (Math.abs(delta) < GAP * 0.42) {
-        this.targetScroll += delta * 0.05;
+      if (Math.abs(delta) < GAP * 0.35) {
+        this.targetScroll += delta * 0.06;
       }
     }
 
     /* ---- smooth scroll + velocity ---- */
     const prev = this.scroll;
-    this.scroll += (this.targetScroll - this.scroll) * (1 - Math.pow(0.0018, dt));
+    const lerpAlpha = 1 - Math.exp(-14 * dt);
+    this.scroll += (this.targetScroll - this.scroll) * lerpAlpha;
     const instV = (this.scroll - prev) / Math.max(dt, 1e-4);
-    this.velocity += (instV - this.velocity) * 0.12;
+    this.velocity += (instV - this.velocity) * 0.16;
     const speed = Math.abs(this.velocity);
 
     /* ---- galaxy swirl ---- */
@@ -1177,6 +1203,7 @@ export class CosmicScene {
   dispose() {
     this.disposed = true;
     cancelAnimationFrame(this.raf);
+    this.timer.dispose();
     window.removeEventListener("wheel", this.onWheel);
     window.removeEventListener("pointermove", this.onPointerMove);
     window.removeEventListener("pointerdown", this.onPointerDown);
