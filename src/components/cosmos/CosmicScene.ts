@@ -436,10 +436,12 @@ export class CosmicScene {
     const geo = new THREE.PlaneGeometry(CARD_W, CARD_H, 1, 1);
 
     this.events.forEach((ev, i) => {
-      const angle = i * 2.39996 + 0.7;
-      const radius = 6.2 + rand() * 3.3;
-      const yOff = (rand() - 0.5) * 5.0;
-      const baseScale = 3.0 + rand() * 1.15;
+      // Gentle continuous helical ribbon down the spacetime tunnel (~25 deg per station)
+      // Future upcoming cards are clearly visible stretching down the corridor ahead!
+      const angle = i * 0.44;
+      const radius = 4.6 + Math.sin(i * 0.8) * 0.9;
+      const yOff = Math.sin(i * 0.6) * 1.4;
+      const baseScale = 3.2 + (i % 2 === 0 ? 0.25 : 0.0);
 
       const tex = texs[i] ?? makePlaceholderTexture(ev.palette.nebula);
       const mat = new THREE.ShaderMaterial({
@@ -836,6 +838,26 @@ export class CosmicScene {
 
     if (this.inputLocked) return;
 
+    // Throttle long-press key repeat: if user is holding down key and targetScroll is already
+    // leading current camera position by more than 0.75 stations, ignore repeated events!
+    const isArrow =
+      e.key === "ArrowDown" ||
+      e.key === "ArrowUp" ||
+      e.key === "ArrowRight" ||
+      e.key === "ArrowLeft" ||
+      e.key === "s" ||
+      e.key === "S" ||
+      e.key === "w" ||
+      e.key === "W";
+
+    if (e.repeat && isArrow) {
+      const lead = Math.abs(this.targetScroll - this.scroll);
+      if (lead > GAP * 0.75) {
+        e.preventDefault();
+        return;
+      }
+    }
+
     switch (e.key) {
       case "ArrowDown":
       case "ArrowRight":
@@ -874,6 +896,34 @@ export class CosmicScene {
     }
   };
 
+  private onKeyUp = (e: KeyboardEvent) => {
+    if (
+      e.key === "ArrowDown" ||
+      e.key === "ArrowUp" ||
+      e.key === "ArrowRight" ||
+      e.key === "ArrowLeft" ||
+      e.key === "s" ||
+      e.key === "S" ||
+      e.key === "w" ||
+      e.key === "W"
+    ) {
+      // The instant the user releases the arrow key, halt runaway continuous scroll!
+      // Immediately snap targetScroll to the very next station directly in front of camera
+      const curP = this.scroll - FOCUS_Z;
+      const curStation = curP / GAP;
+      let stopStation: number;
+      if (this.velocity >= 0.25) {
+        stopStation = Math.ceil(curStation);
+      } else if (this.velocity <= -0.25) {
+        stopStation = Math.floor(curStation);
+      } else {
+        stopStation = Math.round(curStation);
+      }
+      this.targetScroll = stopStation * GAP + FOCUS_Z;
+      this.lastInputAt = performance.now();
+    }
+  };
+
   private onResize = () => {
     this.camera.aspect = window.innerWidth / window.innerHeight;
     this.camera.updateProjectionMatrix();
@@ -890,6 +940,7 @@ export class CosmicScene {
     window.addEventListener("pointerdown", this.onPointerDown, { passive: true });
     window.addEventListener("pointerup", this.onPointerUp, { passive: true });
     window.addEventListener("keydown", this.onKey);
+    window.addEventListener("keyup", this.onKeyUp);
     window.addEventListener("resize", this.onResize);
   }
 
@@ -922,6 +973,12 @@ export class CosmicScene {
     }
     if (this.selectedIdx >= 0) {
       this.closeSelection();
+    }
+    // Prevent piling up steps while holding key:
+    // If targetScroll is already leading the camera in the travel direction by > 0.85 stations, wait!
+    const currentLead = (this.targetScroll - this.scroll) * (dir > 0 ? 1 : -1);
+    if (currentLead > GAP * 0.85) {
+      return;
     }
     // Calculate continuous station index based on current target position
     // (station k docks when targetScroll = k * GAP + FOCUS_Z)
@@ -1096,7 +1153,8 @@ export class CosmicScene {
     const rollTarget = THREE.MathUtils.clamp(this.velocity * 0.006, -0.16, 0.16);
     this.rollCur += (rollTarget - this.rollCur) * 0.05;
     this.camera.up.set(Math.sin(this.rollCur), Math.cos(this.rollCur), 0);
-    this.camera.lookAt(this.lookCur.x, this.lookCur.y, -10);
+    // Look down the spacetime tunnel corridor (-34) so future coming events are clearly visible in the background
+    this.camera.lookAt(this.lookCur.x * 0.5, this.lookCur.y * 0.5, -34);
 
     /* ---- FOV kick with speed ---- */
     const fovTarget = 68 + Math.min(speed * 0.55, 13);
@@ -1396,6 +1454,7 @@ export class CosmicScene {
     window.removeEventListener("pointerdown", this.onPointerDown);
     window.removeEventListener("pointerup", this.onPointerUp);
     window.removeEventListener("keydown", this.onKey);
+    window.removeEventListener("keyup", this.onKeyUp);
     window.removeEventListener("resize", this.onResize);
     this.scene.traverse((o) => {
       const any = o as unknown as {

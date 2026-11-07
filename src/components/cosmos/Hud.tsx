@@ -191,12 +191,34 @@ export default function Hud({
         );
       })()}
 
-      {/* ============ bottom-right ============ */}
-      <div className="absolute bottom-24 right-5 hidden flex-col items-end gap-3 sm:bottom-8 sm:right-7 sm:flex">
-        <p className="font-mono text-[10px] tracking-[0.25em] text-white/40">
-          {TOTAL_EVENTS} EVENTS · ∞ STREAM
-        </p>
-        <button onClick={onBackToStart} className="glass-pill pointer-events-auto group flex items-center gap-2.5">
+      {/* ============ bottom-right: Future Horizons & Controls ============ */}
+      <div className="absolute bottom-24 right-5 hidden flex-col items-end gap-3 sm:bottom-8 sm:right-7 sm:flex pointer-events-auto">
+        {/* Approaching Future Horizons preview in the background (blurred) */}
+        <div className="flex flex-col items-end gap-1.5 rounded-2xl border border-white/10 bg-white/[0.02] p-3 backdrop-blur-md">
+          <p className="font-mono text-[8px] tracking-[0.3em] text-white/40 uppercase">
+            Approaching Horizons
+          </p>
+          <div className="flex items-center gap-2 mt-1">
+            {/* Next epoch +1 (blurred glimpse) */}
+            <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-2.5 py-1.5 filter blur-[1px] select-none transition-all">
+              <span className="font-mono text-[9px] text-emerald-300/80">+{1}</span>
+              <div className="flex flex-col text-right">
+                <span className="font-mono text-[10px] text-white/80 max-w-[110px] truncate">{TIMELINE[(era.index + 1) % TOTAL_EVENTS]?.title}</span>
+                <span className="font-mono text-[8px] text-white/40">{TIMELINE[(era.index + 1) % TOTAL_EVENTS]?.yearLabel}</span>
+              </div>
+            </div>
+            {/* Next epoch +2 (deeper blur) */}
+            <div className="flex items-center gap-2 rounded-xl border border-white/5 bg-white/[0.015] px-2.5 py-1.5 filter blur-[2px] select-none transition-all">
+              <span className="font-mono text-[9px] text-cyan-300/60">+{2}</span>
+              <div className="flex flex-col text-right">
+                <span className="font-mono text-[10px] text-white/60 max-w-[100px] truncate">{TIMELINE[(era.index + 2) % TOTAL_EVENTS]?.title}</span>
+                <span className="font-mono text-[8px] text-white/30">{TIMELINE[(era.index + 2) % TOTAL_EVENTS]?.yearLabel}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <button onClick={onBackToStart} className="glass-pill group flex items-center gap-2.5">
           <span className="grid size-5 place-items-center rounded-full bg-white/10 transition-colors group-hover:bg-white/20">
             <svg width="8" height="8" viewBox="0 0 8 8" fill="none" className="rotate-180">
               <path d="M1 0.5L7 4L1 7.5V0.5Z" fill="white" />
