@@ -51,9 +51,12 @@ const mod = (x: number, T: number) => ((x % T) + T) % T;
 
 const CARD_VERT = /* glsl */ `
   varying vec2 vUv;
+  varying vec3 vViewPos;
   void main() {
     vUv = uv;
-    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    vViewPos = -mvPosition.xyz;
+    gl_Position = projectionMatrix * mvPosition;
   }
 `;
 
@@ -64,12 +67,38 @@ const CARD_FRAG = /* glsl */ `
   uniform float uDim;
   uniform float uOpacity;
   uniform float uSheen;
+  uniform float uBlur;
   uniform vec3 uBorderCol;
   varying vec2 vUv;
+  varying vec3 vViewPos;
 
   float roundedBox(vec2 p, vec2 b, float r) {
     vec2 q = abs(p) - b + r;
     return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+  }
+
+  vec3 sampleCardTexture(sampler2D map, vec2 uv, float blur) {
+    if (blur < 0.05) {
+      return texture2D(map, uv).rgb;
+    }
+    // Multi-tap weighted Poisson / cross sample with LOD for cinematic depth blur
+    float lod = blur * 1.5;
+    vec2 off = vec2(blur * 0.006, blur * 0.006);
+    #if __VERSION__ >= 300
+      vec3 col = textureLod(map, uv, lod).rgb * 0.32;
+      col += textureLod(map, uv + vec2(off.x, 0.0), lod).rgb * 0.17;
+      col += textureLod(map, uv - vec2(off.x, 0.0), lod).rgb * 0.17;
+      col += textureLod(map, uv + vec2(0.0, off.y), lod).rgb * 0.17;
+      col += textureLod(map, uv - vec2(0.0, off.y), lod).rgb * 0.17;
+      return col;
+    #else
+      vec3 col = texture2D(map, uv).rgb * 0.32;
+      col += texture2D(map, uv + vec2(off.x, 0.0)).rgb * 0.17;
+      col += texture2D(map, uv - vec2(off.x, 0.0)).rgb * 0.17;
+      col += texture2D(map, uv + vec2(0.0, off.y)).rgb * 0.17;
+      col += texture2D(map, uv - vec2(0.0, off.y)).rgb * 0.17;
+      return col;
+    #endif
   }
 
   void main() {
@@ -80,7 +109,7 @@ const CARD_FRAG = /* glsl */ `
     float alpha = 1.0 - smoothstep(-aa, aa, d);
     if (alpha < 0.01) discard;
 
-    vec3 tex = texture2D(uMap, vUv).rgb;
+    vec3 tex = sampleCardTexture(uMap, vUv, uBlur);
     // gentle top-light
     float grad = mix(1.06, 0.82, vUv.y);
     vec3 col = tex * uDim * grad;
@@ -96,7 +125,18 @@ const CARD_FRAG = /* glsl */ `
     float pulse = 0.78 + 0.22 * sin(uTime * 2.4);
     col = mix(col, uBorderCol * pulse, borderMask * uBorder);
 
-    gl_FragColor = vec4(col, alpha * uOpacity);
+    // Atmospheric cosmic fog: distant background timelines melt into the void
+    float viewDist = length(vViewPos);
+    float fogFactor = smoothstep(35.0, 150.0, viewDist);
+    vec3 fogColor = vec3(0.02, 0.01, 0.03);
+    col = mix(col, fogColor, fogFactor * 0.82);
+
+    // Fade opacity at extreme distance so cards never abruptly pop when entering view frustum
+    float distFade = 1.0 - smoothstep(110.0, 180.0, viewDist);
+    float finalAlpha = alpha * uOpacity * distFade;
+    if (finalAlpha < 0.01) discard;
+
+    gl_FragColor = vec4(col, finalAlpha);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }
@@ -185,6 +225,7 @@ interface CardRig {
   border: number;
   sheen: number;
   scale: number;
+  blur: number;
   // selection tween
   free: boolean; // being selected/returning (wrap paused)
   returning: boolean;
@@ -409,9 +450,10 @@ export class CosmicScene {
           uMap: { value: tex },
           uTime: { value: 0 },
           uBorder: { value: 0 },
-          uDim: { value: 0.5 },
+          uDim: { value: 0.35 },
           uOpacity: { value: 1 },
           uSheen: { value: 0 },
+          uBlur: { value: 3.8 },
           uBorderCol: { value: new THREE.Color(ev.palette.accent) },
         },
       });
@@ -428,9 +470,10 @@ export class CosmicScene {
         yOff,
         baseScale,
         phase: rand() * Math.PI * 2,
-        dim: 0.5,
+        dim: 0.35,
         border: 0,
         sheen: 0,
+        blur: 3.8,
         scale: baseScale,
         free: false,
         returning: false,
@@ -1116,6 +1159,7 @@ export class CosmicScene {
             rig.dim += (1.15 - rig.dim) * 0.1;
             rig.border += (1.0 - rig.border) * 0.1;
             rig.sheen += (1.0 - rig.sheen) * 0.08;
+            rig.blur += (0.0 - rig.blur) * 0.12;
           } else if (rig.returning) {
             // fly home
             const home = this.tmpV.set(Math.cos(rig.angle) * rig.radius, rig.yOff, cz);
@@ -1129,6 +1173,7 @@ export class CosmicScene {
             rig.dim += (0.75 - rig.dim) * 0.1;
             rig.border *= 0.9;
             rig.sheen *= 0.9;
+            rig.blur += (3.5 - rig.blur) * 0.1;
           }
           rig.mesh.rotateZ(Math.sin(t * 0.5 + rig.phase) * 0.0035);
         } else {
@@ -1143,34 +1188,44 @@ export class CosmicScene {
           rig.mesh.lookAt(this.camera.position);
           rig.mesh.rotateZ(Math.sin(t * 0.35 + rig.phase) * 0.05);
 
-          // targets
-          const nearFocus = Math.exp(-Math.pow((cz - FOCUS_Z) / 16, 2));
-          let tDim = 0.34 + 0.5 * nearFocus;
-          let tBorder = 0;
-          let tSheen = 0.1 * nearFocus;
-          let tScale = rig.baseScale * (1 + 0.16 * nearFocus);
+          // Continuous focus proximity based on exact distance to docking station (FOCUS_Z)
+          const distToDock = Math.abs(cz - FOCUS_Z);
+          const focusInfluence = 15.0; // units of focus capture zone
+          const focusFactor = Math.max(0, 1.0 - Math.pow(distToDock / focusInfluence, 1.6));
+
+          // When in background, blur is high (3.8), keeping other timelines soft & mysterious.
+          // As a card comes into view towards dock, blur smoothly dissolves to 0.0!
+          let tBlur = THREE.MathUtils.lerp(3.8, 0.0, Math.pow(focusFactor, 1.2));
+
+          // Dynamic scale: background cards are subtle (0.92x), swelling to 1.20x at focus
+          let tScale = rig.baseScale * (0.92 + 0.28 * focusFactor);
+
+          // Luminance: background cards are softly dimmed (0.28) so they don't overpower,
+          // glowing to full brilliance (1.05) when in focus
+          let tDim = 0.28 + 0.77 * focusFactor;
+
+          // Glowing border: swells organically as the card approaches the focus dock
+          let tBorder = Math.pow(focusFactor, 1.5);
+          let tSheen = 0.6 * Math.pow(focusFactor, 1.2);
+
           if (this.selectedIdx >= 0) {
-            tDim = 0.1;
+            tDim = 0.08;
             tBorder = 0;
             tSheen = 0;
-            tScale = rig.baseScale;
-          } else {
-            if (isFocus) {
-              tDim = 1.02;
-              tBorder = 1.0;
-              tSheen = 0.55;
-              tScale = rig.baseScale * 1.18;
-            }
-            if (isHover) {
-              tDim = Math.max(tDim, 0.95);
-              tBorder = Math.max(tBorder, 0.85);
-              tScale = Math.max(tScale, rig.baseScale * 1.1);
-            }
+            tBlur = 4.2;
+            tScale = rig.baseScale * 0.9;
+          } else if (isHover) {
+            tDim = Math.max(tDim, 0.98);
+            tBorder = Math.max(tBorder, 0.85);
+            tBlur = Math.min(tBlur, 0.3);
+            tScale = Math.max(tScale, rig.baseScale * 1.12);
           }
-          rig.dim += (tDim - rig.dim) * 0.07;
+
+          rig.dim += (tDim - rig.dim) * 0.08;
           rig.border += (tBorder - rig.border) * 0.09;
-          rig.sheen += (tSheen - rig.sheen) * 0.07;
-          rig.scale += (tScale - rig.scale) * 0.07;
+          rig.sheen += (tSheen - rig.sheen) * 0.08;
+          rig.blur += (tBlur - rig.blur) * 0.09;
+          rig.scale += (tScale - rig.scale) * 0.08;
           rig.mesh.scale.setScalar(rig.scale);
         }
 
@@ -1179,23 +1234,52 @@ export class CosmicScene {
         u.uDim.value = rig.dim;
         u.uBorder.value = rig.border;
         u.uSheen.value = rig.sheen;
+        u.uBlur.value = rig.blur;
       }
     }
 
-    /* ---- glow + title follow the focused card (WORLD space) ---- */
-    const glowRig = this.selectedIdx >= 0 ? this.cards[this.selectedIdx] : this.cards[rawIdx];
-    if (glowRig) {
-      glowRig.mesh.getWorldPosition(this.tmpV2);
-      this.camera.getWorldDirection(this.tmpV);
-      const gTarget = this.tmpV3.copy(this.tmpV2).addScaledVector(this.tmpV, -0.7);
-      this.glowSpr.position.lerp(gTarget, 0.12);
-      const glowMat = this.glowSpr.material as THREE.SpriteMaterial;
-      const pulse = this.selectedIdx >= 0 ? 0.3 : 0.16 + 0.06 * Math.sin(t * 2.2);
-      const gs = this.selectedIdx >= 0 ? 1.5 : 1.0;
-      this.glowSpr.scale.set(9 * gs, 6.2 * gs, 1);
-      glowMat.opacity += (pulse - glowMat.opacity) * 0.08;
-      const wantCol = this.tmpColor.set(this.events[rawIdx]?.palette.accent ?? "#7dffc4");
-      glowMat.color.lerp(wantCol, 0.05);
+    /* ---- glow halo smoothly interpolates between current and approaching station (WORLD space) ---- */
+    if (this.selectedIdx >= 0) {
+      const glowRig = this.cards[this.selectedIdx];
+      if (glowRig) {
+        glowRig.mesh.getWorldPosition(this.tmpV2);
+        this.camera.getWorldDirection(this.tmpV);
+        const gTarget = this.tmpV3.copy(this.tmpV2).addScaledVector(this.tmpV, -0.7);
+        this.glowSpr.position.lerp(gTarget, 0.12);
+        const glowMat = this.glowSpr.material as THREE.SpriteMaterial;
+        this.glowSpr.scale.set(9 * 1.5, 6.2 * 1.5, 1);
+        glowMat.opacity += (0.35 - glowMat.opacity) * 0.08;
+        const wantCol = this.tmpColor.set(this.events[this.selectedIdx]?.palette.accent ?? "#7dffc4");
+        glowMat.color.lerp(wantCol, 0.05);
+      }
+    } else if (this.cards.length) {
+      // Continuous floating station position: p = scroll - FOCUS_Z
+      const stationCont = p / GAP;
+      const sFloor = Math.floor(stationCont);
+      const sCeil = sFloor + 1;
+      const sFrac = THREE.MathUtils.smoothstep(stationCont - sFloor, 0.1, 0.9);
+      const idxA = mod(sFloor, this.cards.length);
+      const idxB = mod(sCeil, this.cards.length);
+      const rigA = this.cards[idxA];
+      const rigB = this.cards[idxB];
+      if (rigA && rigB) {
+        rigA.mesh.getWorldPosition(this.tmpV2);
+        rigB.mesh.getWorldPosition(this.tmpV);
+        this.tmpV2.lerp(this.tmpV, sFrac);
+        this.camera.getWorldDirection(this.tmpV3);
+        const gTarget = this.tmpV2.addScaledVector(this.tmpV3, -0.7);
+        this.glowSpr.position.lerp(gTarget, 0.14);
+
+        const glowMat = this.glowSpr.material as THREE.SpriteMaterial;
+        const pulse = 0.18 + 0.08 * Math.sin(t * 2.2);
+        this.glowSpr.scale.set(9, 6.2, 1);
+        glowMat.opacity += (pulse - glowMat.opacity) * 0.08;
+
+        const colA = this.tmpColor.set(this.events[idxA]?.palette.accent ?? "#7dffc4");
+        const colB = new THREE.Color(this.events[idxB]?.palette.accent ?? "#7dffc4");
+        colA.lerp(colB, sFrac);
+        glowMat.color.lerp(colA, 0.08);
+      }
     }
 
     // floating title (regenerate only when focus settles)
