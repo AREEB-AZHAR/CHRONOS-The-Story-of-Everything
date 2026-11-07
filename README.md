@@ -8,14 +8,15 @@ An interactive, cinematic 3D scroll-through-time web experience taking you on a 
 
 CHRONOS is an immersive timeline experience built using **Next.js 16**, **React 19**, **Three.js (r186+)**, and **Tailwind CSS v4**.
 
-### Key Highlights & Features
+### Key Highlights & Recent Updates
+- **Section-by-Section Keyboard Navigation**: Pressing `↓` (Arrow Down / `S`) or `↑` (Arrow Up / `W`) smoothly steps section-by-section through the 30 timeline eras, landing squarely and accurately at each station dock. Also supports `PageDown`/`PageUp` multi-era jumps and `Home`/`End`.
+- **Intelligent Approach Braking & Magnetic Detents**: When scrolling with mouse wheel or touchpad, dynamic resistance and velocity cushioning activate as a new event section approaches. Rapid gestures can no longer uncontrollably blow past eras. When scrolling pauses, magnetic capture gently guides the camera into the exact dock.
+- **Cinematic Video Landing Page**: The intro screen (`Intro.tsx`) now features a looping high-definition cosmic particle video background (`/cosmos/space-bg.mp4`), multilayered radial vignettes, celestial astrolabe motion, and instant keyboard launch via `Space`, `Enter`, or `↓`.
+- **Bespoke Chronos Celestial Logo (`public/logo.svg`)**: Replaced default vendor iconography with a custom-crafted vector insignia featuring intertwined armillary orbits, a luminous singularity core, and 12 epoch celestial dials.
 - **30 Cosmic Epochs**: Spanning the Big Bang, First Stars, Galaxy Formation, Solar Ignition, Earth & Moon, Origin of Life, the Great Oxidation, Cambrian Explosion, Dinosaur Era, Chicxulub Extinction, Mammals, Hominins, Ice Age, Civilizations, and the Space Age.
 - **Cinematic 3D Corridor**: Custom frame-rate independent `requestAnimationFrame` lerp-smoothed navigation through 30 3D card stations with dynamic swirling, depth blur, and floating glass narrative panels.
 - **Zero-Jank GPU Pre-Upload**: All epoch textures are pre-allocated and mipmapped on the GPU during the initial loading phase (`renderer.initTexture`), completely eliminating the 40ms frame drops when new cards cross the view frustum.
 - **Modern Three.js Engine (`THREE.Timer`)**: Migrated to the modern Three.js r186+ `THREE.Timer` architecture for rock-solid delta timing across tab visibility changes and high-refresh-rate displays.
-- **Logarithmic Time Progression**: Deep time smoothly compresses billions of eons while slowing down into recent millennia and human history.
-- **Starfield & Warp Tunnel**: Dynamic starfield and space dust particles that respond to scroll velocity with relativistic warp speed effects.
-- **Extinction Event Highlights**: Dedicated visual highlights marking Earth's mass extinctions and human history milestones.
 
 ---
 

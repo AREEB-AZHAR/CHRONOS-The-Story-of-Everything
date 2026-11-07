@@ -166,10 +166,11 @@ export function AboutModal({ open, onClose }: { open: boolean; onClose: () => vo
                 counter races, that is the true gulf of deep time passing by.
               </p>
               <ul className="space-y-2 font-mono text-[11px] tracking-[0.12em] text-white/55">
-                <li>· SCROLL, DRAG or ARROW KEYS — travel through time</li>
-                <li>· CLICK ANY CARD — it flies to you with its story</li>
+                <li>· ↑ ↓ ARROW KEYS — step section-by-section through the eras</li>
+                <li>· SCROLL / DRAG — cushioned travel with magnetic approach detents</li>
+                <li>· CLICK ANY CARD — it flies to you with its deep story</li>
                 <li>· ESC — release a moment back into the stream</li>
-                <li>· STOP SCROLLING — the stream docks you at the nearest era</li>
+                <li>· STOP SCROLLING — magnetic capture settles you at the nearest era</li>
               </ul>
               <p className="font-display italic text-white/60">
                 “The cosmos is within us. We are made of star-stuff.” — Carl Sagan

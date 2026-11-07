@@ -676,7 +676,25 @@ export class CosmicScene {
   private onWheel = (e: WheelEvent) => {
     if (this.inputLocked) return;
     const mult = e.deltaMode === 1 ? 24 : e.deltaMode === 2 ? 100 : 1;
-    this.targetScroll += e.deltaY * 0.052 * mult;
+
+    // Proximity to nearest station dock
+    const p = this.scroll - FOCUS_Z;
+    const pOffset = mod(p + GAP * 0.5, GAP) - GAP * 0.5;
+    const distToStation = Math.abs(pOffset);
+    // As a new event section approaches, apply tactile detent resistance
+    const approachZone = 7.5;
+    const approachFactor = Math.max(0, 1 - distToStation / approachZone);
+    const brake = 1.0 - 0.42 * approachFactor;
+
+    this.targetScroll += e.deltaY * 0.038 * mult * brake;
+
+    // Prevent runaway scroll: clamp targetScroll lead to ~1.3 stations
+    const MAX_LEAD = 34;
+    this.targetScroll = THREE.MathUtils.clamp(
+      this.targetScroll,
+      this.scroll - MAX_LEAD,
+      this.scroll + MAX_LEAD
+    );
     this.lastInputAt = performance.now();
   };
 
@@ -692,7 +710,20 @@ export class CosmicScene {
       this.dragLastY = e.clientY;
       if (Math.abs(e.clientY - this.downPos.y) > 6 || Math.abs(this.targetScroll) > 0) {
         if (!this.inputLocked) {
-          this.targetScroll += dy * 0.09;
+          const p = this.scroll - FOCUS_Z;
+          const pOffset = mod(p + GAP * 0.5, GAP) - GAP * 0.5;
+          const distToStation = Math.abs(pOffset);
+          const approachZone = 7.5;
+          const approachFactor = Math.max(0, 1 - distToStation / approachZone);
+          const brake = 1.0 - 0.4 * approachFactor;
+
+          this.targetScroll += dy * 0.065 * brake;
+          const MAX_LEAD = 34;
+          this.targetScroll = THREE.MathUtils.clamp(
+            this.targetScroll,
+            this.scroll - MAX_LEAD,
+            this.scroll + MAX_LEAD
+          );
           this.lastInputAt = performance.now();
         }
       }
@@ -743,32 +774,60 @@ export class CosmicScene {
       if (this.selectedIdx >= 0) this.closeSelection();
       return;
     }
+
+    // If modal is active, allow pressing arrows to close and step seamlessly
+    if (this.selectedIdx >= 0) {
+      if (e.key === "ArrowDown" || e.key === "ArrowRight") {
+        e.preventDefault();
+        this.closeSelection();
+        this.stepSection(1);
+        return;
+      }
+      if (e.key === "ArrowUp" || e.key === "ArrowLeft") {
+        e.preventDefault();
+        this.closeSelection();
+        this.stepSection(-1);
+        return;
+      }
+    }
+
     if (this.inputLocked) return;
-    let delta = 0;
+
     switch (e.key) {
       case "ArrowDown":
+      case "ArrowRight":
       case "s":
       case "S":
-        delta = 34;
-        break;
-      case "PageDown":
-        delta = 110;
+        e.preventDefault();
+        this.stepSection(1);
         break;
       case "ArrowUp":
+      case "ArrowLeft":
       case "w":
       case "W":
-        delta = -34;
+        e.preventDefault();
+        this.stepSection(-1);
+        break;
+      case "PageDown":
+        e.preventDefault();
+        this.stepSection(3);
         break;
       case "PageUp":
-        delta = -110;
+        e.preventDefault();
+        this.stepSection(-3);
+        break;
+      case "Home":
+        e.preventDefault();
+        this.jumpTo(0);
+        break;
+      case "End":
+        e.preventDefault();
+        this.jumpTo(this.events.length - 1);
         break;
       case " ":
-        delta = 60;
+        e.preventDefault();
+        this.stepSection(1);
         break;
-    }
-    if (delta !== 0) {
-      this.targetScroll += delta;
-      this.lastInputAt = performance.now();
     }
   };
 
@@ -809,6 +868,30 @@ export class CosmicScene {
     if (delta > this.loopT / 2) delta -= this.loopT;
     if (delta < -this.loopT / 2) delta += this.loopT;
     this.targetScroll += delta;
+    this.lastInputAt = performance.now();
+  }
+
+  /** Step cleanly section-by-section along the cosmic timeline */
+  stepSection(dir: number) {
+    if (!this.begun) {
+      this.begin();
+      return;
+    }
+    if (this.selectedIdx >= 0) {
+      this.closeSelection();
+    }
+    // Calculate continuous station index based on current target position
+    // (station k docks when targetScroll = k * GAP + FOCUS_Z)
+    const curStation = (this.targetScroll - FOCUS_Z) / GAP;
+    let targetStation: number;
+    if (dir > 0) {
+      // Step forward to next integer station
+      targetStation = Math.floor(curStation + 0.08) + dir;
+    } else {
+      // Step backward to previous integer station
+      targetStation = Math.ceil(curStation - 0.08) + dir;
+    }
+    this.targetScroll = targetStation * GAP + FOCUS_Z;
     this.lastInputAt = performance.now();
   }
 
@@ -880,27 +963,47 @@ export class CosmicScene {
       if (!docked || lingered) this.targetScroll += 2.1 * dt;
     }
 
-    /* ---- magnetic docking: gently settle onto the nearest station when fully resting ---- */
+    /* ---- magnetic docking: gently settle onto the nearest station when scroll eases or pauses ---- */
+    const timeSinceInput = performance.now() - this.lastInputAt;
+    const pScroll = this.scroll - FOCUS_Z;
+    const pDockOffset = mod(pScroll + GAP * 0.5, GAP) - GAP * 0.5;
+    const distToStation = Math.abs(pDockOffset);
+
     if (
       this.ready &&
       !this.inputLocked &&
       this.selectedIdx < 0 &&
-      Math.abs(this.velocity) < 0.6 &&
-      performance.now() - this.lastInputAt > 1200 &&
-      Math.abs(this.targetScroll - this.scroll) < 0.6
+      this.begun &&
+      timeSinceInput > 200 &&
+      Math.abs(this.velocity) < 6.5
     ) {
-      const f = this.scroll - FOCUS_Z;
-      const nearest = Math.round(f / GAP) * GAP;
-      const delta = nearest - f;
-      if (Math.abs(delta) < GAP * 0.35) {
-        this.targetScroll += delta * 0.06;
+      const nearestDock = Math.round(pScroll / GAP) * GAP;
+      const deltaDock = nearestDock - pScroll;
+      if (Math.abs(deltaDock) < GAP * 0.44) {
+        const pull = Math.min(1.0, 5.0 * dt);
+        const dockTarget = nearestDock + FOCUS_Z;
+        this.targetScroll += (dockTarget - this.targetScroll) * pull;
       }
     }
 
-    /* ---- smooth scroll + velocity ---- */
+    /* ---- smooth scroll + velocity with event section approach braking ---- */
+    // As a new event section approaches (distToStation < 8.5), smoothly cushion velocity and spring
+    const approachRadius = 8.5;
+    const approachFactor = Math.max(0, 1 - distToStation / approachRadius);
+
+    // Spring rate: responsive in deep void (11.5) down to cushioned (5.8) near event dock
+    const lerpRate = THREE.MathUtils.lerp(11.5, 5.8, approachFactor);
+    const lerpAlpha = 1 - Math.exp(-lerpRate * dt);
+
+    // Speed ceiling: drops from 32.0 u/s down to 10.0 u/s when an event section approaches
+    const maxSpeed = THREE.MathUtils.lerp(32.0, 10.0, Math.pow(approachFactor, 1.2));
+    const maxDelta = maxSpeed * dt;
+
     const prev = this.scroll;
-    const lerpAlpha = 1 - Math.exp(-14 * dt);
-    this.scroll += (this.targetScroll - this.scroll) * lerpAlpha;
+    let step = (this.targetScroll - this.scroll) * lerpAlpha;
+    step = THREE.MathUtils.clamp(step, -maxDelta, maxDelta);
+    this.scroll += step;
+
     const instV = (this.scroll - prev) / Math.max(dt, 1e-4);
     this.velocity += (instV - this.velocity) * 0.16;
     const speed = Math.abs(this.velocity);

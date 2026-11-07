@@ -31,7 +31,8 @@ export const metadata: Metadata = {
   ],
   authors: [{ name: "Z.ai" }],
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: "/logo.svg",
+    apple: "/logo.svg",
   },
   openGraph: {
     title: "CHRONOS ∞ — Stand at the Centre of Spacetime",

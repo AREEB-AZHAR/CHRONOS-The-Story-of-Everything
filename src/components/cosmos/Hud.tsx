@@ -68,11 +68,9 @@ export default function Hud({
       <header className="absolute inset-x-0 top-0 flex items-start justify-between gap-4 p-5 sm:p-7">
         {/* logo */}
         <div className="flex items-center gap-3">
-          <span className="logo-orbit relative grid size-9 place-items-center">
-            <span className="absolute inset-0 rounded-full border border-white/25" />
-            <span className="absolute inset-0 rounded-full border-t-[1.5px] border-emerald-300/90 spin-slow" />
-            <span className="size-[5px] rounded-full bg-emerald-300 shadow-[0_0_10px_2px_rgba(110,231,183,0.8)]" />
-          </span>
+          <div className="relative size-8 shrink-0 overflow-hidden rounded-full border border-emerald-400/40 p-0.5 shadow-[0_0_12px_rgba(52,211,153,0.35)]">
+            <img src="/logo.svg" alt="CHRONOS Logo" className="size-full" />
+          </div>
           <div className="leading-none">
             <p className="font-mono text-sm font-bold tracking-[0.35em] text-white">CHRONOS</p>
             <p className="mt-1 font-mono text-[9px] tracking-[0.3em] text-white/40">
@@ -168,7 +166,7 @@ export default function Hud({
           </span>
         </button>
         <p className="font-mono text-[9px] tracking-[0.2em] text-white/30">
-          SCROLL · DRAG · CLICK A MOMENT
+          SCROLL · ↑ ↓ KEYS · CLICK A MOMENT
         </p>
       </div>
 
