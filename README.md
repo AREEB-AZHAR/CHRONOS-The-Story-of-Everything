@@ -9,6 +9,12 @@ An interactive, cinematic 3D scroll-through-time web experience taking you on a 
 CHRONOS is an immersive timeline experience built using **Next.js 16**, **React 19**, **Three.js (r186+)**, and **Tailwind CSS v4**.
 
 ### Key Highlights & Recent Updates
+- **Direct Background Card Click Warp**: Clicking any distant background 3D card visible along the corridor sightline instantly engages hyperspace Space Warp directly to that timeline era! Clicking the docked foreground card opens its in-depth exploration sheet.
+- **Mobile UI Experience & Readability Overhaul**:
+  - **Zero Text Collisions**: The HUD bottom-left editorial block (`"01 / 30"`, `"The Big Bang"`, `"COSMIC ORIGIN · 13.8 BILLION YEARS AGO"`) and mobile navigation buttons cleanly fade out (`opacity-0 pointer-events-none`) when an era sheet opens, eliminating all visual overlap and text bleeding.
+  - **Opaque Obsidian Glass Mobile Sheet**: Upgraded `InfoPanel` on mobile viewports with a rich, high-contrast dark space glass backdrop (`!bg-[#07040d]/96 backdrop-blur-2xl border-t border-white/20 shadow-[0_-24px_60px_rgba(0,0,0,0.95)]`), guaranteeing 100% legibility of all historical descriptions, key facts, and life summaries.
+  - **Mobile Pull-Down Handle**: Added a top grab-handle indicator pill for intuitive touch dismissal.
+  - **Refined Portrait 3D Card Framing**: In portrait viewports, the selected card is positioned at `target.y = 1.35` with scale `1.55`, perfectly framed in the upper mobile screen without clipping under the top navigation header.
 - **Space Warp Default Scroll Experience**: The cinematic **Space Warp** is now the default navigation behavior across all inputs — mouse wheel, trackpad scrolling, touch swiping, and keyboard keys. Every deliberate scroll gesture launches you into hyperspace warp to the next or previous epoch with intelligent trackpad inertia bleeding.
 - **Travel Time Scaled to Cosmic Time Distance**: The duration of your hyperspace warp flight directly reflects the real temporal chasm between epochs ($\Delta\text{years}$):
   - *Small historical jumps* (e.g. thousands of years in civilization): snappy $\approx 0.75\text{s}$ warp flash.

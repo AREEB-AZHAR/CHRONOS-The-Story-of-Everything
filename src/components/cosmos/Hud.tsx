@@ -120,7 +120,11 @@ export default function Hud({
         </nav>
 
         {/* mobile nav */}
-        <div className="pointer-events-auto flex items-center gap-4 sm:hidden">
+        <div
+          className={`pointer-events-auto flex items-center gap-4 transition-opacity duration-300 sm:hidden ${
+            selectionActive ? "opacity-0 pointer-events-none" : "opacity-100"
+          }`}
+        >
           <button
             onClick={onOpenEras}
             className="glass-pill px-3 py-1.5 font-mono text-[10px] tracking-widest text-emerald-300"
@@ -137,7 +141,11 @@ export default function Hud({
       </header>
 
       {/* ============ bottom-left editorial block ============ */}
-      <div className="absolute bottom-24 left-5 max-w-[76vw] sm:bottom-8 sm:left-7 sm:max-w-md pointer-events-auto">
+      <div
+        className={`pointer-events-auto absolute bottom-24 left-5 max-w-[76vw] transition-opacity duration-300 sm:bottom-8 sm:left-7 sm:max-w-md ${
+          selectionActive ? "opacity-0 pointer-events-none" : "opacity-100"
+        }`}
+      >
         <div className="mb-2 font-mono text-[10px] tracking-[0.25em] text-emerald-400/80">
           <span ref={idxRef} /> / {TOTAL_EVENTS}
         </div>

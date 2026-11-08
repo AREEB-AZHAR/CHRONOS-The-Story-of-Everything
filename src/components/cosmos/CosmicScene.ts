@@ -861,7 +861,16 @@ export class CosmicScene {
       }
       const hit = this.pickAt(e.clientX, e.clientY);
       if (hit >= 0) {
-        this.select(hit);
+        const curP = this.scroll - FOCUS_Z;
+        const curStation = Math.round(curP / GAP);
+        const curIdx = mod(curStation, this.events.length);
+        if (hit === curIdx) {
+          // Clicking the currently docked foreground card opens its details modal
+          this.select(hit);
+        } else {
+          // Clicking an image in the background corridor initiates Space Warp to that era!
+          this.jumpTo(hit);
+        }
       }
     }
   };
@@ -1317,13 +1326,13 @@ export class CosmicScene {
                   .copy(this.camera.position)
                   .addScaledVector(this.tmpV2, dist);
                 target.x += -this.tmpV2.z * side;
-                target.y += portrait ? 2.4 : 0.12;
+                target.y += portrait ? 1.35 : 0.12;
                 target.z += this.tmpV2.x * side;
                 // convert world → local (the galaxy group slowly rotates)
                 this.world.updateMatrixWorld();
                 this.world.worldToLocal(target);
                 rig.mesh.position.lerp(target, 0.085);
-                const targetScale = portrait ? 2.0 : 2.7;
+                const targetScale = portrait ? 1.55 : 2.7;
                 rig.scale += (targetScale - rig.scale) * 0.09;
                 rig.mesh.scale.setScalar(rig.scale);
                 rig.mesh.lookAt(this.camera.position);

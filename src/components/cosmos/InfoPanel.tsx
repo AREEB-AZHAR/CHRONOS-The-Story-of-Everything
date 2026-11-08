@@ -39,15 +39,20 @@ export default function InfoPanel({ event, onClose }: InfoPanelProps) {
             key={event.id}
             role="dialog"
             aria-label={`${event.title} information`}
-            initial={{ opacity: 0, x: 80, filter: "blur(12px)" }}
-            animate={{ opacity: 1, x: 0, filter: "blur(0px)" }}
-            exit={{ opacity: 0, x: 60, filter: "blur(10px)" }}
-            transition={{ type: "spring", stiffness: 160, damping: 22, mass: 0.9 }}
+            initial={{ opacity: 0, y: 36, filter: "blur(12px)" }}
+            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            exit={{ opacity: 0, y: 24, filter: "blur(10px)" }}
+            transition={{ type: "spring", stiffness: 180, damping: 24, mass: 0.9 }}
             className="glass-panel fixed z-30 flex flex-col overflow-hidden
-                       right-0 bottom-0 left-0 max-h-[68dvh] rounded-t-3xl
+                       right-0 bottom-0 left-0 max-h-[60dvh] rounded-t-3xl
+                       !bg-[#07040d]/96 sm:!bg-transparent backdrop-blur-2xl
+                       border-t border-white/20 shadow-[0_-24px_60px_rgba(0,0,0,0.95)]
                        sm:top-1/2 sm:bottom-auto sm:left-auto sm:right-7 sm:w-[420px]
-                       sm:max-h-[82vh] sm:-translate-y-1/2 sm:rounded-3xl"
+                       sm:max-h-[82vh] sm:-translate-y-1/2 sm:rounded-3xl sm:border sm:border-white/16"
           >
+            {/* mobile drag handle */}
+            <div className="mx-auto mt-3 h-1 w-11 shrink-0 rounded-full bg-white/30 sm:hidden" />
+
             {/* moving animated shine */}
             <span className="sheen pointer-events-none absolute inset-0 z-10" aria-hidden />
             {/* top edge highlight */}
@@ -57,7 +62,7 @@ export default function InfoPanel({ event, onClose }: InfoPanelProps) {
             />
 
             {/* header */}
-            <div className="relative flex items-start justify-between gap-4 p-5 pb-0 sm:p-7 sm:pb-0">
+            <div className="relative flex items-start justify-between gap-4 p-5 pt-3 pb-0 sm:p-7 sm:pb-0">
               <div>
                 <span
                   className="chip inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 font-mono text-[9px] tracking-[0.22em]"
