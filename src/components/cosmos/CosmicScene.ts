@@ -284,6 +284,8 @@ export class CosmicScene {
     dir: 1,
   };
   private warpFactor = 0; // 0..1 smooth hyperspace warp factor
+  private wheelAccum = 0;
+  private wheelLastAt = 0;
 
   /**
    * Calculates dynamic space warp flight duration based on the real cosmic time gap (years)
@@ -776,27 +778,35 @@ export class CosmicScene {
 
   private onWheel = (e: WheelEvent) => {
     if (this.inputLocked) return;
-    const mult = e.deltaMode === 1 ? 24 : e.deltaMode === 2 ? 100 : 1;
 
-    // Proximity to nearest station dock
-    const p = this.scroll - FOCUS_Z;
-    const pOffset = mod(p + GAP * 0.5, GAP) - GAP * 0.5;
-    const distToStation = Math.abs(pOffset);
-    // As a new event section approaches, apply tactile detent resistance
-    const approachZone = 7.5;
-    const approachFactor = Math.max(0, 1 - distToStation / approachZone);
-    const brake = 1.0 - 0.42 * approachFactor;
+    const now = performance.now();
+    // Flush residual accumulator if gesture paused for > 350ms
+    if (now - this.wheelLastAt > 350) {
+      this.wheelAccum = 0;
+    }
+    this.wheelLastAt = now;
+    this.lastInputAt = now;
 
-    this.targetScroll += e.deltaY * 0.038 * mult * brake;
+    // Normalize delta across wheel modes (0 = pixels, 1 = lines, 2 = pages)
+    const mult = e.deltaMode === 1 ? 24 : e.deltaMode === 2 ? 80 : 1;
+    this.wheelAccum += e.deltaY * mult;
 
-    // Prevent runaway scroll: clamp targetScroll lead to ~1.3 stations
-    const MAX_LEAD = 34;
-    this.targetScroll = THREE.MathUtils.clamp(
-      this.targetScroll,
-      this.scroll - MAX_LEAD,
-      this.scroll + MAX_LEAD
-    );
-    this.lastInputAt = performance.now();
+    // While in hyperspace warp, absorb trailing trackpad inertia; allow chaining past 60%
+    if (this.warpFlight.active) {
+      const elapsed = (now - this.warpFlight.startTime) / 1000;
+      const progress = elapsed / Math.max(this.warpFlight.duration, 0.1);
+      if (progress < 0.6) {
+        this.wheelAccum = 0;
+        return;
+      }
+    }
+
+    const WHEEL_THRESHOLD = 36;
+    if (Math.abs(this.wheelAccum) >= WHEEL_THRESHOLD) {
+      const dir = Math.sign(this.wheelAccum);
+      this.wheelAccum = 0; // reset accumulator immediately to prevent double-triggers
+      this.stepSection(dir > 0 ? 1 : -1);
+    }
   };
 
   private onPointerMove = (e: PointerEvent) => {
@@ -806,27 +816,13 @@ export class CosmicScene {
     this.mouse.x = this.pointer.x;
     this.mouse.y = this.pointer.y;
 
-    if (this.dragging) {
-      const dy = e.clientY - this.dragLastY;
-      this.dragLastY = e.clientY;
-      if (Math.abs(e.clientY - this.downPos.y) > 6 || Math.abs(this.targetScroll) > 0) {
-        if (!this.inputLocked) {
-          const p = this.scroll - FOCUS_Z;
-          const pOffset = mod(p + GAP * 0.5, GAP) - GAP * 0.5;
-          const distToStation = Math.abs(pOffset);
-          const approachZone = 7.5;
-          const approachFactor = Math.max(0, 1 - distToStation / approachZone);
-          const brake = 1.0 - 0.4 * approachFactor;
-
-          this.targetScroll += dy * 0.065 * brake;
-          const MAX_LEAD = 34;
-          this.targetScroll = THREE.MathUtils.clamp(
-            this.targetScroll,
-            this.scroll - MAX_LEAD,
-            this.scroll + MAX_LEAD
-          );
-          this.lastInputAt = performance.now();
-        }
+    if (this.dragging && !this.inputLocked) {
+      const totalDy = e.clientY - this.downPos.y;
+      const DRAG_THRESHOLD = 35;
+      if (Math.abs(totalDy) >= DRAG_THRESHOLD) {
+        const dir = totalDy < 0 ? 1 : -1;
+        this.downPos.y = e.clientY; // reset drag anchor
+        this.stepSection(dir);
       }
     }
   };
@@ -1037,53 +1033,53 @@ export class CosmicScene {
     // Target station:
     // If already in warp in the same direction, chain forward by one more station!
     let nextStation: number;
-    if (this.warpFlight.active && Math.sign(this.warpFlight.dir) === Math.sign(dir)) {
-      nextStation = this.warpFlight.targetStation + (dir > 0 ? 1 : -1);
-    } else {
-      nextStation = dir > 0 ? Math.floor(curStation + 0.05) + 1 : Math.ceil(curStation - 0.05) - 1;
+      if (this.warpFlight.active && Math.sign(this.warpFlight.dir) === Math.sign(dir)) {
+        nextStation = this.warpFlight.targetStation + (dir > 0 ? 1 : -1);
+      } else {
+        nextStation = dir > 0 ? Math.floor(curStation + 0.05) + 1 : Math.ceil(curStation - 0.05) - 1;
+      }
+
+      const fromIdx = mod(Math.round(curStation), this.events.length);
+      const toIdx = mod(nextStation, this.events.length);
+      const duration = this.getEraWarpDuration(fromIdx, toIdx);
+      const goalScroll = nextStation * GAP + FOCUS_Z;
+
+      this.warpFlight = {
+        active: true,
+        startStation: curStation,
+        targetStation: nextStation,
+        startScroll: this.scroll,
+        targetScroll: goalScroll,
+        startTime: performance.now(),
+        duration,
+        dir: dir > 0 ? 1 : -1,
+      };
+
+      this.targetScroll = goalScroll;
+      this.lastInputAt = performance.now();
     }
 
-    const fromIdx = mod(Math.round(curStation), this.events.length);
-    const toIdx = mod(nextStation, this.events.length);
-    const duration = this.getEraWarpDuration(fromIdx, toIdx);
-    const goalScroll = nextStation * GAP + FOCUS_Z;
+    select(idx: number) {
+      if (this.selectedIdx === idx) return;
+      this.selectedIdx = idx;
+      this.inputLocked = true;
+      const rig = this.cards[idx];
+      if (rig) rig.free = true;
+      this.cb.onSelect?.(idx);
+    }
 
-    this.warpFlight = {
-      active: true,
-      startStation: curStation,
-      targetStation: nextStation,
-      startScroll: this.scroll,
-      targetScroll: goalScroll,
-      startTime: performance.now(),
-      duration,
-      dir: dir > 0 ? 1 : -1,
-    };
-
-    this.targetScroll = goalScroll;
-    this.lastInputAt = performance.now();
-  }
-
-  select(idx: number) {
-    if (this.selectedIdx === idx) return;
-    this.selectedIdx = idx;
-    this.inputLocked = true;
-    const rig = this.cards[idx];
-    if (rig) rig.free = true;
-    this.cb.onSelect?.(idx);
-  }
-
-  closeSelection() {
-    if (this.selectedIdx < 0) return;
-    const rig = this.cards[this.selectedIdx];
-    if (rig) rig.returning = true;
-    this.selectedIdx = -1;
-    this.cb.onSelect?.(null);
-    // unlock shortly after the card starts flying home
-    setTimeout(() => {
-      this.inputLocked = false;
-      this.lastInputAt = performance.now();
-    }, 350);
-  }
+    closeSelection() {
+      if (this.selectedIdx < 0) return;
+      const rig = this.cards[this.selectedIdx];
+      if (rig) rig.returning = true;
+      this.selectedIdx = -1;
+      this.cb.onSelect?.(null);
+      // unlock shortly after the card starts flying home
+      setTimeout(() => {
+        this.inputLocked = false;
+        this.lastInputAt = performance.now();
+      }, 350);
+    }
 
   /* ================= main loop ================= */
 
@@ -1130,415 +1126,415 @@ export class CosmicScene {
           ? 16 * Math.pow(progress, 5)
           : 1 - Math.pow(-2 * progress + 2, 5) / 2;
 
-      const prevScroll = this.scroll;
-      this.scroll =
-        this.warpFlight.startScroll +
-        (this.warpFlight.targetScroll - this.warpFlight.startScroll) * ease;
-      this.targetScroll = this.scroll;
+          const prevScroll = this.scroll;
+          this.scroll =
+            this.warpFlight.startScroll +
+            (this.warpFlight.targetScroll - this.warpFlight.startScroll) * ease;
+          this.targetScroll = this.scroll;
 
-      // Peak warp factor is high in the middle of flight:
-      const rawWarp = Math.sin(progress * Math.PI);
-      this.warpFactor = Math.pow(rawWarp, 1.35);
+          // Peak warp factor is high in the middle of flight:
+          const rawWarp = Math.sin(progress * Math.PI);
+          this.warpFactor = Math.pow(rawWarp, 1.35);
 
-      // Instantaneous warp velocity for effects
-      const instV = (this.scroll - prevScroll) / Math.max(dt, 1e-4);
-      this.velocity = instV;
+          // Instantaneous warp velocity for effects
+          const instV = (this.scroll - prevScroll) / Math.max(dt, 1e-4);
+          this.velocity = instV;
 
-      if (progress >= 1.0) {
-        this.scroll = this.warpFlight.targetScroll;
-        this.targetScroll = this.warpFlight.targetScroll;
-        this.warpFlight.active = false;
-        this.velocity = 0;
-      }
-    } else {
-      // Warp factor decays smoothly to zero when not warping
-      this.warpFactor += (0 - this.warpFactor) * 0.12;
-
-      /* ---- idle auto-drift: the stream carries you, lingering at each station ---- */
-      const idle = performance.now() - this.lastInputAt > 4000;
-      if (idle && !this.inputLocked && this.selectedIdx < 0 && this.ready && this.begun) {
-        const fDock = this.scroll - FOCUS_Z;
-        const nearestDock = Math.round(fDock / GAP) * GAP;
-        const docked = Math.abs(fDock - nearestDock) < 0.6;
-        if (docked && this.dockedAt < 0) this.dockedAt = performance.now();
-        if (!docked) this.dockedAt = -1;
-        const lingered = this.dockedAt > 0 && performance.now() - this.dockedAt > 8000;
-        if (!docked || lingered) this.targetScroll += 2.1 * dt;
-      }
-
-      /* ---- magnetic docking: gently settle onto the nearest station when scroll eases or pauses ---- */
-      const timeSinceInput = performance.now() - this.lastInputAt;
-      const pScroll = this.scroll - FOCUS_Z;
-      const pDockOffset = mod(pScroll + GAP * 0.5, GAP) - GAP * 0.5;
-      const distToStation = Math.abs(pDockOffset);
-
-      if (
-        this.ready &&
-        !this.inputLocked &&
-        this.selectedIdx < 0 &&
-        this.begun &&
-        timeSinceInput > 200 &&
-        Math.abs(this.velocity) < 6.5
-      ) {
-        const nearestDock = Math.round(pScroll / GAP) * GAP;
-        const deltaDock = nearestDock - pScroll;
-        if (Math.abs(deltaDock) < GAP * 0.44) {
-          const pull = Math.min(1.0, 5.0 * dt);
-          const dockTarget = nearestDock + FOCUS_Z;
-          this.targetScroll += (dockTarget - this.targetScroll) * pull;
-        }
-      }
-
-      /* ---- smooth scroll + velocity with event section approach braking ---- */
-      const pScrollNow = this.scroll - FOCUS_Z;
-      const pDockOffsetNow = mod(pScrollNow + GAP * 0.5, GAP) - GAP * 0.5;
-      const distToStationNow = Math.abs(pDockOffsetNow);
-      const approachRadius = 8.5;
-      const approachFactor = Math.max(0, 1 - distToStationNow / approachRadius);
-
-      const lerpRate = THREE.MathUtils.lerp(14.0, 8.5, approachFactor);
-      const lerpAlpha = 1 - Math.exp(-lerpRate * dt);
-      const maxSpeed = THREE.MathUtils.lerp(50.0, 18.0, Math.pow(approachFactor, 1.2));
-      const maxDelta = maxSpeed * dt;
-
-      const prev = this.scroll;
-      let step = (this.targetScroll - this.scroll) * lerpAlpha;
-      step = THREE.MathUtils.clamp(step, -maxDelta, maxDelta);
-      this.scroll += step;
-
-      const instV = (this.scroll - prev) / Math.max(dt, 1e-4);
-      this.velocity += (instV - this.velocity) * 0.16;
-    }
-    const speed = Math.abs(this.velocity);
-
-    /* ---- galaxy swirl ---- */
-    const swirl =
-      t * 0.016 + mod(this.scroll, this.loopT) * 0.00042 + this.velocity * 0.00035;
-    this.world.rotation.z = swirl;
-
-    /* ---- focus determination: p = position in station space ---- */
-    const p = this.scroll - FOCUS_Z; // card i docks exactly when p ≡ i*GAP
-    const rawIdx = mod(Math.round(p / GAP), this.events.length);
-    const focusProgress = mod(p, GAP) / GAP;
-    const floorIdx = mod(Math.floor(p / GAP), this.events.length);
-    const ceilIdx = (floorIdx + 1) % this.events.length;
-
-    if (this.ready && rawIdx !== this.lastEra) {
-      this.lastEra = rawIdx;
-      this.cb.onEraChange?.(rawIdx);
-    }
-
-    /* ---- year interpolation (floor → ceil station) ---- */
-    const a = this.events[floorIdx];
-    const b = this.events[ceilIdx];
-    const yearVal = a && b ? a.yearsAgo + (b.yearsAgo - a.yearsAgo) * focusProgress : (a?.yearsAgo ?? 0);
-
-    /* ---- camera: head-turn toward focus card + parallax + banking ---- */
-    this.mouse.sx += (this.mouse.x - this.mouse.sx) * 0.05;
-    this.mouse.sy += (this.mouse.y - this.mouse.sy) * 0.05;
-    let lookX = this.mouse.sx * 2.6;
-    let lookY = -this.mouse.sy * 1.7;
-    if (this.ready && this.cards.length) {
-      const rig = this.cards[rawIdx];
-      if (rig) {
-        const cz = this.getCardZ(rig.station);
-        if (cz > -60 && cz < BEHIND && this.selectedIdx < 0) {
-          const wp = this.tmpV
-            .set(Math.cos(rig.angle) * rig.radius, rig.yOff, cz)
-            .applyAxisAngle(CosmicScene.Z_AXIS, swirl);
-          lookX = lookX * 0.4 + wp.x * 0.38;
-          lookY = lookY * 0.4 + wp.y * 0.38;
-        }
-      }
-    }
-    this.lookCur.x += (lookX - this.lookCur.x) * 0.045;
-    this.lookCur.y += (lookY - this.lookCur.y) * 0.045;
-    const rollTarget = THREE.MathUtils.clamp(this.velocity * 0.006, -0.16, 0.16);
-    this.rollCur += (rollTarget - this.rollCur) * 0.05;
-    this.camera.up.set(Math.sin(this.rollCur), Math.cos(this.rollCur), 0);
-    // Look straight down the spacetime tunnel corridor (-40) so the entire avenue of future cards is visible
-    this.camera.lookAt(this.lookCur.x * 0.4, this.lookCur.y * 0.4, -40);
-
-    /* ---- space warp star uniforms, FOV distortion, and relativistic vibration ---- */
-    if (this.starsMat) {
-      this.starsMat.uniforms.uWarp.value = this.warpFactor;
-    }
-    if (this.dustMat) {
-      this.dustMat.uniforms.uWarp.value = this.warpFactor;
-    }
-
-    // Dynamic FOV: Standard 68°, expanding outward to 94° in hyperspace warp!
-    const warpFovTarget = 68 + this.warpFactor * 26 + Math.min(speed * 0.35, 10);
-    if (Math.abs(this.camera.fov - warpFovTarget) > 0.05) {
-      this.camera.fov += (warpFovTarget - this.camera.fov) * 0.14;
-      this.camera.updateProjectionMatrix();
-    }
-
-    // Relativistic cockpit vibration during peak hyperspace cruise
-    const warpShakeX = (Math.sin(t * 53.0) + Math.cos(t * 89.0)) * 0.06 * this.warpFactor;
-    const warpShakeY = (Math.cos(t * 61.0) + Math.sin(t * 79.0)) * 0.05 * this.warpFactor;
-    this.camera.position.x = warpShakeX;
-    this.camera.position.y = warpShakeY;
-
-    /* ---- hover raycast (throttled) ---- */
-    if (this.ready && this.pointerInside && this.frameCount % 2 === 0 && this.selectedIdx < 0) {
-      this.raycaster.setFromCamera(this.pointer, this.camera);
-      const candidates: THREE.Mesh[] = [];
-      for (let i = 0; i < this.cards.length; i++) {
-        const rig = this.cards[i];
-        const cz = this.getCardZ(rig.station);
-        if (cz > -70 && cz < 4 && !rig.free) candidates.push(rig.mesh);
-      }
-      const hits = this.raycaster.intersectObjects(candidates, false);
-      if (hits.length) {
-        this.hoveredIdx = this.cards.findIndex((r) => r.mesh === hits[0].object);
+          if (progress >= 1.0) {
+            this.scroll = this.warpFlight.targetScroll;
+            this.targetScroll = this.warpFlight.targetScroll;
+            this.warpFlight.active = false;
+            this.velocity = 0;
+          }
       } else {
-        this.hoveredIdx = -1;
-      }
-      this.canvas.style.cursor = this.hoveredIdx >= 0 ? "pointer" : "default";
-    }
-    if (this.selectedIdx >= 0) this.hoveredIdx = -1;
+        // Warp factor decays smoothly to zero when not warping
+        this.warpFactor += (0 - this.warpFactor) * 0.12;
 
-    /* ---- cards ---- */
-    if (this.ready) {
-      for (let i = 0; i < this.cards.length; i++) {
-        const rig = this.cards[i];
-        const isFocus = i === rawIdx && this.selectedIdx < 0;
-        const isHover = i === this.hoveredIdx;
-        const isSel = i === this.selectedIdx;
-
-        const cz = this.getCardZ(rig.station);
-
-        if (rig.free) {
-          // ---- selected / returning: manual control ----
-          if (isSel) {
-            // bring it right up to the viewer
-            const portrait = window.innerHeight > window.innerWidth;
-            const dist = portrait ? 6.2 : 4.6;
-            const side = portrait ? 0 : -1.15;
-            this.camera.getWorldDirection(this.tmpV2);
-            const target = this.tmpV3
-              .copy(this.camera.position)
-              .addScaledVector(this.tmpV2, dist);
-            target.x += -this.tmpV2.z * side;
-            target.y += portrait ? 2.4 : 0.12;
-            target.z += this.tmpV2.x * side;
-            // convert world → local (the galaxy group slowly rotates)
-            this.world.updateMatrixWorld();
-            this.world.worldToLocal(target);
-            rig.mesh.position.lerp(target, 0.085);
-            const targetScale = portrait ? 2.0 : 2.7;
-            rig.scale += (targetScale - rig.scale) * 0.09;
-            rig.mesh.scale.setScalar(rig.scale);
-            rig.mesh.lookAt(this.camera.position);
-            rig.dim += (1.15 - rig.dim) * 0.1;
-            rig.border += (1.0 - rig.border) * 0.1;
-            rig.sheen += (1.0 - rig.sheen) * 0.08;
-            rig.blur += (0.0 - rig.blur) * 0.12;
-          } else if (rig.returning) {
-            // fly home
-            const home = this.tmpV.set(Math.cos(rig.angle) * rig.radius, rig.yOff, cz);
-            rig.mesh.position.lerp(home, 0.11);
-            rig.scale += (rig.baseScale - rig.scale) * 0.11;
-            rig.mesh.scale.setScalar(rig.scale);
-            if (rig.mesh.position.distanceTo(home) < 0.12) {
-              rig.returning = false;
-              rig.free = false;
-            }
-            rig.dim += (0.75 - rig.dim) * 0.1;
-            rig.border *= 0.9;
-            rig.sheen *= 0.9;
-            rig.blur += (3.8 - rig.blur) * 0.1;
-          }
-          rig.mesh.rotateZ(Math.sin(t * 0.5 + rig.phase) * 0.0035);
-        } else {
-          // ---- floating around the viewer, wrapping forever ----
-          const bob = Math.sin(t * 0.42 + rig.phase) * 0.28;
-          const sway = Math.cos(t * 0.3 + rig.phase * 1.7) * 0.2;
-          rig.mesh.position.set(
-            Math.cos(rig.angle) * rig.radius + sway,
-            rig.yOff + bob,
-            cz
-          );
-          rig.mesh.lookAt(this.camera.position);
-          rig.mesh.rotateZ(Math.sin(t * 0.35 + rig.phase) * 0.05);
-
-          // Continuous focus proximity based on exact distance to docking station (FOCUS_Z)
-          const distToDock = Math.abs(cz - FOCUS_Z);
-          const focusInfluence = 16.0; // units of focus capture zone
-          const focusFactor = Math.max(0, 1.0 - Math.pow(distToDock / focusInfluence, 1.6));
-
-          // When in background, blur is high (4.2), keeping other timelines soft & mysterious.
-          // As a card comes into view towards dock, blur smoothly dissolves to 0.0!
-          let tBlur = THREE.MathUtils.lerp(4.2, 0.0, Math.pow(focusFactor, 1.2));
-
-          // Dynamic scale: background cards are subtle (0.90x), swelling to 1.20x at focus
-          let tScale = rig.baseScale * (0.90 + 0.30 * focusFactor);
-
-          // Luminance: background cards are softly dimmed (0.30) so they don't overpower,
-          // glowing to full brilliance (1.05) when in focus
-          let tDim = 0.30 + 0.75 * focusFactor;
-
-          // Glowing border: swells organically as the card approaches the focus dock
-          let tBorder = Math.pow(focusFactor, 1.5);
-          let tSheen = 0.6 * Math.pow(focusFactor, 1.2);
-
-          if (this.selectedIdx >= 0) {
-            tDim = 0.08;
-            tBorder = 0;
-            tSheen = 0;
-            tBlur = 4.2;
-            tScale = rig.baseScale * 0.9;
-          } else if (isHover) {
-            tDim = Math.max(tDim, 0.98);
-            tBorder = Math.max(tBorder, 0.85);
-            tBlur = Math.min(tBlur, 0.3);
-            tScale = Math.max(tScale, rig.baseScale * 1.12);
-          }
-
-          rig.dim += (tDim - rig.dim) * 0.08;
-          rig.border += (tBorder - rig.border) * 0.09;
-          rig.sheen += (tSheen - rig.sheen) * 0.08;
-          rig.blur += (tBlur - rig.blur) * 0.09;
-          rig.scale += (tScale - rig.scale) * 0.08;
-          rig.mesh.scale.setScalar(rig.scale);
+        /* ---- idle auto-drift: the stream carries you, lingering at each station ---- */
+        const idle = performance.now() - this.lastInputAt > 4000;
+        if (idle && !this.inputLocked && this.selectedIdx < 0 && this.ready && this.begun) {
+          const fDock = this.scroll - FOCUS_Z;
+          const nearestDock = Math.round(fDock / GAP) * GAP;
+          const docked = Math.abs(fDock - nearestDock) < 0.6;
+          if (docked && this.dockedAt < 0) this.dockedAt = performance.now();
+          if (!docked) this.dockedAt = -1;
+          const lingered = this.dockedAt > 0 && performance.now() - this.dockedAt > 8000;
+          if (!docked || lingered) this.targetScroll += 2.1 * dt;
         }
 
-        const u = rig.mat.uniforms;
-        u.uTime.value = t;
-        u.uDim.value = rig.dim;
-        u.uBorder.value = rig.border;
-        u.uSheen.value = rig.sheen;
-        u.uBlur.value = rig.blur;
+        /* ---- magnetic docking: gently settle onto the nearest station when scroll eases or pauses ---- */
+        const timeSinceInput = performance.now() - this.lastInputAt;
+        const pScroll = this.scroll - FOCUS_Z;
+        const pDockOffset = mod(pScroll + GAP * 0.5, GAP) - GAP * 0.5;
+        const distToStation = Math.abs(pDockOffset);
+
+        if (
+          this.ready &&
+          !this.inputLocked &&
+          this.selectedIdx < 0 &&
+          this.begun &&
+          timeSinceInput > 200 &&
+          Math.abs(this.velocity) < 6.5
+        ) {
+          const nearestDock = Math.round(pScroll / GAP) * GAP;
+          const deltaDock = nearestDock - pScroll;
+          if (Math.abs(deltaDock) < GAP * 0.44) {
+            const pull = Math.min(1.0, 5.0 * dt);
+            const dockTarget = nearestDock + FOCUS_Z;
+            this.targetScroll += (dockTarget - this.targetScroll) * pull;
+          }
+        }
+
+        /* ---- smooth scroll + velocity with event section approach braking ---- */
+        const pScrollNow = this.scroll - FOCUS_Z;
+        const pDockOffsetNow = mod(pScrollNow + GAP * 0.5, GAP) - GAP * 0.5;
+        const distToStationNow = Math.abs(pDockOffsetNow);
+        const approachRadius = 8.5;
+        const approachFactor = Math.max(0, 1 - distToStationNow / approachRadius);
+
+        const lerpRate = THREE.MathUtils.lerp(14.0, 8.5, approachFactor);
+        const lerpAlpha = 1 - Math.exp(-lerpRate * dt);
+        const maxSpeed = THREE.MathUtils.lerp(50.0, 18.0, Math.pow(approachFactor, 1.2));
+        const maxDelta = maxSpeed * dt;
+
+        const prev = this.scroll;
+        let step = (this.targetScroll - this.scroll) * lerpAlpha;
+        step = THREE.MathUtils.clamp(step, -maxDelta, maxDelta);
+        this.scroll += step;
+
+        const instV = (this.scroll - prev) / Math.max(dt, 1e-4);
+        this.velocity += (instV - this.velocity) * 0.16;
       }
-    }
+      const speed = Math.abs(this.velocity);
 
-    /* ---- glow halo smoothly interpolates between current and approaching station (WORLD space) ---- */
-    if (this.selectedIdx >= 0) {
-      const glowRig = this.cards[this.selectedIdx];
-      if (glowRig) {
-        glowRig.mesh.getWorldPosition(this.tmpV2);
-        this.camera.getWorldDirection(this.tmpV);
-        const gTarget = this.tmpV3.copy(this.tmpV2).addScaledVector(this.tmpV, -0.7);
-        this.glowSpr.position.lerp(gTarget, 0.12);
-        const glowMat = this.glowSpr.material as THREE.SpriteMaterial;
-        this.glowSpr.scale.set(9 * 1.5, 6.2 * 1.5, 1);
-        glowMat.opacity += (0.35 - glowMat.opacity) * 0.08;
-        const wantCol = this.tmpColor.set(this.events[this.selectedIdx]?.palette.accent ?? "#7dffc4");
-        glowMat.color.lerp(wantCol, 0.05);
+      /* ---- galaxy swirl ---- */
+      const swirl =
+        t * 0.016 + mod(this.scroll, this.loopT) * 0.00042 + this.velocity * 0.00035;
+      this.world.rotation.z = swirl;
+
+      /* ---- focus determination: p = position in station space ---- */
+      const p = this.scroll - FOCUS_Z; // card i docks exactly when p ≡ i*GAP
+      const rawIdx = mod(Math.round(p / GAP), this.events.length);
+      const focusProgress = mod(p, GAP) / GAP;
+      const floorIdx = mod(Math.floor(p / GAP), this.events.length);
+      const ceilIdx = (floorIdx + 1) % this.events.length;
+
+      if (this.ready && rawIdx !== this.lastEra) {
+        this.lastEra = rawIdx;
+        this.cb.onEraChange?.(rawIdx);
       }
-    } else if (this.cards.length) {
-      // Continuous floating station position: p = scroll - FOCUS_Z
-      const stationCont = p / GAP;
-      const sFloor = Math.floor(stationCont);
-      const sCeil = sFloor + 1;
-      const sFrac = THREE.MathUtils.smoothstep(stationCont - sFloor, 0.1, 0.9);
-      const idxA = mod(sFloor, this.cards.length);
-      const idxB = mod(sCeil, this.cards.length);
-      const rigA = this.cards[idxA];
-      const rigB = this.cards[idxB];
-      if (rigA && rigB) {
-        rigA.mesh.getWorldPosition(this.tmpV2);
-        rigB.mesh.getWorldPosition(this.tmpV);
-        this.tmpV2.lerp(this.tmpV, sFrac);
-        this.camera.getWorldDirection(this.tmpV3);
-        const gTarget = this.tmpV2.addScaledVector(this.tmpV3, -0.7);
-        this.glowSpr.position.lerp(gTarget, 0.14);
 
-        const glowMat = this.glowSpr.material as THREE.SpriteMaterial;
-        const pulse = 0.18 + 0.08 * Math.sin(t * 2.2);
-        this.glowSpr.scale.set(9, 6.2, 1);
-        glowMat.opacity += (pulse - glowMat.opacity) * 0.08;
+      /* ---- year interpolation (floor → ceil station) ---- */
+      const a = this.events[floorIdx];
+      const b = this.events[ceilIdx];
+      const yearVal = a && b ? a.yearsAgo + (b.yearsAgo - a.yearsAgo) * focusProgress : (a?.yearsAgo ?? 0);
 
-        const colA = this.tmpColor.set(this.events[idxA]?.palette.accent ?? "#7dffc4");
-        const colB = new THREE.Color(this.events[idxB]?.palette.accent ?? "#7dffc4");
-        colA.lerp(colB, sFrac);
-        glowMat.color.lerp(colA, 0.08);
+      /* ---- camera: head-turn toward focus card + parallax + banking ---- */
+      this.mouse.sx += (this.mouse.x - this.mouse.sx) * 0.05;
+      this.mouse.sy += (this.mouse.y - this.mouse.sy) * 0.05;
+      let lookX = this.mouse.sx * 2.6;
+      let lookY = -this.mouse.sy * 1.7;
+      if (this.ready && this.cards.length) {
+        const rig = this.cards[rawIdx];
+        if (rig) {
+          const cz = this.getCardZ(rig.station);
+          if (cz > -60 && cz < BEHIND && this.selectedIdx < 0) {
+            const wp = this.tmpV
+              .set(Math.cos(rig.angle) * rig.radius, rig.yOff, cz)
+              .applyAxisAngle(CosmicScene.Z_AXIS, swirl);
+            lookX = lookX * 0.4 + wp.x * 0.38;
+            lookY = lookY * 0.4 + wp.y * 0.38;
+          }
+        }
       }
-    }
+      this.lookCur.x += (lookX - this.lookCur.x) * 0.045;
+      this.lookCur.y += (lookY - this.lookCur.y) * 0.045;
+      const rollTarget = THREE.MathUtils.clamp(this.velocity * 0.006, -0.16, 0.16);
+      this.rollCur += (rollTarget - this.rollCur) * 0.05;
+      this.camera.up.set(Math.sin(this.rollCur), Math.cos(this.rollCur), 0);
+      // Look straight down the spacetime tunnel corridor (-40) so the entire avenue of future cards is visible
+      this.camera.lookAt(this.lookCur.x * 0.4, this.lookCur.y * 0.4, -40);
 
-    // floating title (regenerate only when focus settles)
-    if (this.ready && this.cards.length) {
-      if (this.titleIdx !== rawIdx) {
-        this.titlePendingIdx = rawIdx;
-        this.titleChangeAt = performance.now();
-        this.titleIdx = rawIdx;
-      }
-      if (
-        this.titlePendingIdx >= 0 &&
-        performance.now() - this.titleChangeAt > 140 &&
-        (this.titleSpr.material as THREE.SpriteMaterial).map
-      ) {
-        this.drawTitle(this.titlePendingIdx);
-        this.titlePendingIdx = -1;
-      }
-      const tr = this.cards[rawIdx];
-      if (tr) {
-        tr.mesh.getWorldPosition(this.tmpV2);
-        const portrait = window.innerHeight > window.innerWidth;
-        const tTarget = this.tmpV3.set(
-          this.tmpV2.x * 0.82,
-          this.tmpV2.y - (portrait ? 2.6 : 2.25),
-          this.tmpV2.z + 0.6
-        );
-        this.titleSpr.position.lerp(tTarget, 0.1);
-        const wantOpacity =
-          this.selectedIdx >= 0
-            ? 0
-            : Math.exp(-Math.pow((this.tmpV2.z - FOCUS_Z) / 10, 2)) * 0.95;
-        const m = this.titleSpr.material as THREE.SpriteMaterial;
-        m.opacity += (wantOpacity - m.opacity) * 0.08;
-      }
-    }
+        /* ---- space warp star uniforms, FOV distortion, and relativistic vibration ---- */
+        if (this.starsMat) {
+          this.starsMat.uniforms.uWarp.value = this.warpFactor;
+        }
+        if (this.dustMat) {
+          this.dustMat.uniforms.uWarp.value = this.warpFactor;
+        }
 
-    /* ---- starfield & dust wrap ---- */
-    if (this.stars) {
-      this.stars.position.z = mod(this.scroll, this.loopT);
-    }
-    if (this.dust) {
-      const T = this.dust.userData.T as number;
-      this.dust.position.z = mod(this.scroll, T);
-      if (this.dustMat) {
-        this.dustMat.uniforms.uOpacity.value = 0.35 + Math.min(speed * 0.004, 0.5);
-      }
-    }
+        // Dynamic FOV: Standard 68°, expanding outward to 94° in hyperspace warp!
+        const warpFovTarget = 68 + this.warpFactor * 26 + Math.min(speed * 0.35, 10);
+        if (Math.abs(this.camera.fov - warpFovTarget) > 0.05) {
+          this.camera.fov += (warpFovTarget - this.camera.fov) * 0.14;
+          this.camera.updateProjectionMatrix();
+        }
 
-    /* ---- shards ---- */
-    if (this.shardMat) {
-      this.shardMat.uniforms.uScroll.value = this.scroll;
-      this.shardMat.uniforms.uTime.value = t;
-      const targetDim = this.selectedIdx >= 0 ? 0.16 : 0.9;
-      this.shardMat.uniforms.uDim.value +=
-        (targetDim - this.shardMat.uniforms.uDim.value) * 0.06;
-    }
+        // Relativistic cockpit vibration during peak hyperspace cruise
+        const warpShakeX = (Math.sin(t * 53.0) + Math.cos(t * 89.0)) * 0.06 * this.warpFactor;
+        const warpShakeY = (Math.cos(t * 61.0) + Math.sin(t * 79.0)) * 0.05 * this.warpFactor;
+        this.camera.position.x = warpShakeX;
+        this.camera.position.y = warpShakeY;
 
-    /* ---- nebulas wrap ---- */
-    for (const n of this.nebulas) {
-      n.spr.position.z = mod(this.scroll - n.station + BEHIND, this.loopT) - BEHIND;
-    }
+        /* ---- hover raycast (throttled) ---- */
+        if (this.ready && this.pointerInside && this.frameCount % 2 === 0 && this.selectedIdx < 0) {
+          this.raycaster.setFromCamera(this.pointer, this.camera);
+          const candidates: THREE.Mesh[] = [];
+          for (let i = 0; i < this.cards.length; i++) {
+            const rig = this.cards[i];
+            const cz = this.getCardZ(rig.station);
+            if (cz > -70 && cz < 4 && !rig.free) candidates.push(rig.mesh);
+          }
+          const hits = this.raycaster.intersectObjects(candidates, false);
+          if (hits.length) {
+            this.hoveredIdx = this.cards.findIndex((r) => r.mesh === hits[0].object);
+          } else {
+            this.hoveredIdx = -1;
+          }
+          this.canvas.style.cursor = this.hoveredIdx >= 0 ? "pointer" : "default";
+        }
+        if (this.selectedIdx >= 0) this.hoveredIdx = -1;
 
-    /* ---- palette ambience ---- */
-    const palA = this.events[floorIdx]?.palette;
-    const palB = this.events[ceilIdx]?.palette;
-    if (palA && palB) {
-      this.bgTarget.set(palA.bg).lerp(new THREE.Color(palB.bg), focusProgress);
-    }
-    this.bgCur.lerp(this.bgTarget, 0.03);
-    (this.scene.background as THREE.Color).copy(this.bgCur);
-    (this.scene.fog as THREE.Fog).color.copy(this.bgCur);
+        /* ---- cards ---- */
+        if (this.ready) {
+          for (let i = 0; i < this.cards.length; i++) {
+            const rig = this.cards[i];
+            const isFocus = i === rawIdx && this.selectedIdx < 0;
+            const isHover = i === this.hoveredIdx;
+            const isSel = i === this.selectedIdx;
 
-    /* ---- report ---- */
-    if (this.ready && this.frameCount % 2 === 0) {
-      this.cb.onFrame?.({
-        year: yearVal,
-        focusIdx: rawIdx,
-        loopProgress: mod(this.scroll, this.loopT) / this.loopT,
-        speed,
-      });
-    }
+            const cz = this.getCardZ(rig.station);
 
-    this.renderer.render(this.scene, this.camera);
-  };
+            if (rig.free) {
+              // ---- selected / returning: manual control ----
+              if (isSel) {
+                // bring it right up to the viewer
+                const portrait = window.innerHeight > window.innerWidth;
+                const dist = portrait ? 6.2 : 4.6;
+                const side = portrait ? 0 : -1.15;
+                this.camera.getWorldDirection(this.tmpV2);
+                const target = this.tmpV3
+                  .copy(this.camera.position)
+                  .addScaledVector(this.tmpV2, dist);
+                target.x += -this.tmpV2.z * side;
+                target.y += portrait ? 2.4 : 0.12;
+                target.z += this.tmpV2.x * side;
+                // convert world → local (the galaxy group slowly rotates)
+                this.world.updateMatrixWorld();
+                this.world.worldToLocal(target);
+                rig.mesh.position.lerp(target, 0.085);
+                const targetScale = portrait ? 2.0 : 2.7;
+                rig.scale += (targetScale - rig.scale) * 0.09;
+                rig.mesh.scale.setScalar(rig.scale);
+                rig.mesh.lookAt(this.camera.position);
+                rig.dim += (1.15 - rig.dim) * 0.1;
+                rig.border += (1.0 - rig.border) * 0.1;
+                rig.sheen += (1.0 - rig.sheen) * 0.08;
+                rig.blur += (0.0 - rig.blur) * 0.12;
+              } else if (rig.returning) {
+                // fly home
+                const home = this.tmpV.set(Math.cos(rig.angle) * rig.radius, rig.yOff, cz);
+                rig.mesh.position.lerp(home, 0.11);
+                rig.scale += (rig.baseScale - rig.scale) * 0.11;
+                rig.mesh.scale.setScalar(rig.scale);
+                if (rig.mesh.position.distanceTo(home) < 0.12) {
+                  rig.returning = false;
+                  rig.free = false;
+                }
+                rig.dim += (0.75 - rig.dim) * 0.1;
+                rig.border *= 0.9;
+                rig.sheen *= 0.9;
+                rig.blur += (3.8 - rig.blur) * 0.1;
+              }
+              rig.mesh.rotateZ(Math.sin(t * 0.5 + rig.phase) * 0.0035);
+            } else {
+              // ---- floating around the viewer, wrapping forever ----
+              const bob = Math.sin(t * 0.42 + rig.phase) * 0.28;
+              const sway = Math.cos(t * 0.3 + rig.phase * 1.7) * 0.2;
+              rig.mesh.position.set(
+                Math.cos(rig.angle) * rig.radius + sway,
+                rig.yOff + bob,
+                cz
+              );
+              rig.mesh.lookAt(this.camera.position);
+              rig.mesh.rotateZ(Math.sin(t * 0.35 + rig.phase) * 0.05);
+
+              // Continuous focus proximity based on exact distance to docking station (FOCUS_Z)
+              const distToDock = Math.abs(cz - FOCUS_Z);
+              const focusInfluence = 16.0; // units of focus capture zone
+              const focusFactor = Math.max(0, 1.0 - Math.pow(distToDock / focusInfluence, 1.6));
+
+              // When in background, blur is high (4.2), keeping other timelines soft & mysterious.
+              // As a card comes into view towards dock, blur smoothly dissolves to 0.0!
+              let tBlur = THREE.MathUtils.lerp(4.2, 0.0, Math.pow(focusFactor, 1.2));
+
+              // Dynamic scale: background cards are subtle (0.90x), swelling to 1.20x at focus
+              let tScale = rig.baseScale * (0.90 + 0.30 * focusFactor);
+
+              // Luminance: background cards are softly dimmed (0.30) so they don't overpower,
+              // glowing to full brilliance (1.05) when in focus
+              let tDim = 0.30 + 0.75 * focusFactor;
+
+              // Glowing border: swells organically as the card approaches the focus dock
+              let tBorder = Math.pow(focusFactor, 1.5);
+              let tSheen = 0.6 * Math.pow(focusFactor, 1.2);
+
+              if (this.selectedIdx >= 0) {
+                tDim = 0.08;
+                tBorder = 0;
+                tSheen = 0;
+                tBlur = 4.2;
+                tScale = rig.baseScale * 0.9;
+              } else if (isHover) {
+                tDim = Math.max(tDim, 0.98);
+                tBorder = Math.max(tBorder, 0.85);
+                tBlur = Math.min(tBlur, 0.3);
+                tScale = Math.max(tScale, rig.baseScale * 1.12);
+              }
+
+              rig.dim += (tDim - rig.dim) * 0.08;
+              rig.border += (tBorder - rig.border) * 0.09;
+              rig.sheen += (tSheen - rig.sheen) * 0.08;
+              rig.blur += (tBlur - rig.blur) * 0.09;
+              rig.scale += (tScale - rig.scale) * 0.08;
+              rig.mesh.scale.setScalar(rig.scale);
+            }
+
+            const u = rig.mat.uniforms;
+            u.uTime.value = t;
+            u.uDim.value = rig.dim;
+            u.uBorder.value = rig.border;
+            u.uSheen.value = rig.sheen;
+            u.uBlur.value = rig.blur;
+          }
+        }
+
+        /* ---- glow halo smoothly interpolates between current and approaching station (WORLD space) ---- */
+        if (this.selectedIdx >= 0) {
+          const glowRig = this.cards[this.selectedIdx];
+          if (glowRig) {
+            glowRig.mesh.getWorldPosition(this.tmpV2);
+            this.camera.getWorldDirection(this.tmpV);
+            const gTarget = this.tmpV3.copy(this.tmpV2).addScaledVector(this.tmpV, -0.7);
+            this.glowSpr.position.lerp(gTarget, 0.12);
+            const glowMat = this.glowSpr.material as THREE.SpriteMaterial;
+            this.glowSpr.scale.set(9 * 1.5, 6.2 * 1.5, 1);
+            glowMat.opacity += (0.35 - glowMat.opacity) * 0.08;
+            const wantCol = this.tmpColor.set(this.events[this.selectedIdx]?.palette.accent ?? "#7dffc4");
+            glowMat.color.lerp(wantCol, 0.05);
+          }
+        } else if (this.cards.length) {
+          // Continuous floating station position: p = scroll - FOCUS_Z
+          const stationCont = p / GAP;
+          const sFloor = Math.floor(stationCont);
+          const sCeil = sFloor + 1;
+          const sFrac = THREE.MathUtils.smoothstep(stationCont - sFloor, 0.1, 0.9);
+          const idxA = mod(sFloor, this.cards.length);
+          const idxB = mod(sCeil, this.cards.length);
+          const rigA = this.cards[idxA];
+          const rigB = this.cards[idxB];
+          if (rigA && rigB) {
+            rigA.mesh.getWorldPosition(this.tmpV2);
+            rigB.mesh.getWorldPosition(this.tmpV);
+            this.tmpV2.lerp(this.tmpV, sFrac);
+            this.camera.getWorldDirection(this.tmpV3);
+            const gTarget = this.tmpV2.addScaledVector(this.tmpV3, -0.7);
+            this.glowSpr.position.lerp(gTarget, 0.14);
+
+            const glowMat = this.glowSpr.material as THREE.SpriteMaterial;
+            const pulse = 0.18 + 0.08 * Math.sin(t * 2.2);
+            this.glowSpr.scale.set(9, 6.2, 1);
+            glowMat.opacity += (pulse - glowMat.opacity) * 0.08;
+
+            const colA = this.tmpColor.set(this.events[idxA]?.palette.accent ?? "#7dffc4");
+            const colB = new THREE.Color(this.events[idxB]?.palette.accent ?? "#7dffc4");
+            colA.lerp(colB, sFrac);
+            glowMat.color.lerp(colA, 0.08);
+          }
+        }
+
+        // floating title (regenerate only when focus settles)
+        if (this.ready && this.cards.length) {
+          if (this.titleIdx !== rawIdx) {
+            this.titlePendingIdx = rawIdx;
+            this.titleChangeAt = performance.now();
+            this.titleIdx = rawIdx;
+          }
+          if (
+            this.titlePendingIdx >= 0 &&
+            performance.now() - this.titleChangeAt > 140 &&
+            (this.titleSpr.material as THREE.SpriteMaterial).map
+          ) {
+            this.drawTitle(this.titlePendingIdx);
+            this.titlePendingIdx = -1;
+          }
+          const tr = this.cards[rawIdx];
+          if (tr) {
+            tr.mesh.getWorldPosition(this.tmpV2);
+            const portrait = window.innerHeight > window.innerWidth;
+            const tTarget = this.tmpV3.set(
+              this.tmpV2.x * 0.82,
+              this.tmpV2.y - (portrait ? 2.6 : 2.25),
+              this.tmpV2.z + 0.6
+            );
+            this.titleSpr.position.lerp(tTarget, 0.1);
+            const wantOpacity =
+              this.selectedIdx >= 0
+                ? 0
+                : Math.exp(-Math.pow((this.tmpV2.z - FOCUS_Z) / 10, 2)) * 0.95;
+            const m = this.titleSpr.material as THREE.SpriteMaterial;
+            m.opacity += (wantOpacity - m.opacity) * 0.08;
+          }
+        }
+
+        /* ---- starfield & dust wrap ---- */
+        if (this.stars) {
+          this.stars.position.z = mod(this.scroll, this.loopT);
+        }
+        if (this.dust) {
+          const T = this.dust.userData.T as number;
+          this.dust.position.z = mod(this.scroll, T);
+          if (this.dustMat) {
+            this.dustMat.uniforms.uOpacity.value = 0.35 + Math.min(speed * 0.004, 0.5);
+          }
+        }
+
+        /* ---- shards ---- */
+        if (this.shardMat) {
+          this.shardMat.uniforms.uScroll.value = this.scroll;
+          this.shardMat.uniforms.uTime.value = t;
+          const targetDim = this.selectedIdx >= 0 ? 0.16 : 0.9;
+          this.shardMat.uniforms.uDim.value +=
+            (targetDim - this.shardMat.uniforms.uDim.value) * 0.06;
+        }
+
+        /* ---- nebulas wrap ---- */
+        for (const n of this.nebulas) {
+          n.spr.position.z = mod(this.scroll - n.station + BEHIND, this.loopT) - BEHIND;
+        }
+
+        /* ---- palette ambience ---- */
+        const palA = this.events[floorIdx]?.palette;
+        const palB = this.events[ceilIdx]?.palette;
+        if (palA && palB) {
+          this.bgTarget.set(palA.bg).lerp(new THREE.Color(palB.bg), focusProgress);
+        }
+        this.bgCur.lerp(this.bgTarget, 0.03);
+        (this.scene.background as THREE.Color).copy(this.bgCur);
+        (this.scene.fog as THREE.Fog).color.copy(this.bgCur);
+
+        /* ---- report ---- */
+        if (this.ready && this.frameCount % 2 === 0) {
+          this.cb.onFrame?.({
+            year: yearVal,
+            focusIdx: rawIdx,
+            loopProgress: mod(this.scroll, this.loopT) / this.loopT,
+            speed,
+          });
+        }
+
+        this.renderer.render(this.scene, this.camera);
+      };
 
   /* ================= title sprite ================= */
 

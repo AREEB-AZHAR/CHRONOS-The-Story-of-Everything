@@ -9,7 +9,7 @@ An interactive, cinematic 3D scroll-through-time web experience taking you on a 
 CHRONOS is an immersive timeline experience built using **Next.js 16**, **React 19**, **Three.js (r186+)**, and **Tailwind CSS v4**.
 
 ### Key Highlights & Recent Updates
-- **Single-Click Space Warp Navigation**: Tapping `↓` (Arrow Down / `S`), `↑` (Arrow Up / `W`), or clicking any moment in the drawer immediately initiates an autonomous **Space Warp** flight to the destination epoch. No holding down keys required — a single click effortlessly transports you across deep spacetime!
+- **Space Warp Default Scroll Experience**: The cinematic **Space Warp** is now the default navigation behavior across all inputs — mouse wheel, trackpad scrolling, touch swiping, and keyboard keys. Every deliberate scroll gesture launches you into hyperspace warp to the next or previous epoch with intelligent trackpad inertia bleeding.
 - **Travel Time Scaled to Cosmic Time Distance**: The duration of your hyperspace warp flight directly reflects the real temporal chasm between epochs ($\Delta\text{years}$):
   - *Small historical jumps* (e.g. thousands of years in civilization): snappy $\approx 0.75\text{s}$ warp flash.
   - *Medium evolutionary steps* (e.g. tens to hundreds of millions of years): $\approx 1.1\text{s} - 1.4\text{s}$ warp flight.
@@ -19,6 +19,7 @@ CHRONOS is an immersive timeline experience built using **Next.js 16**, **React 
   - **Relativistic Star Streaks**: In `STAR_VERT` and `STAR_FRAG`, particle points bloom and stretch vertically along the travel vector with an intense cyan-white hyper-luminescent sheen.
   - **Relativistic Cockpit Vibration**: Subtle micro-tremors (50–80Hz) proportional to the warp factor simulate high-velocity spacetime transit.
   - **Quintic S-Curve Motion Profile**: Punchy acceleration into hyperspace $\to$ hyper-velocity cruise $\to$ cushioned, pristine drop-out squarely at the destination era dock.
+- **Single-Click & Touch Navigation**: Single tap on arrow keys or touch swipe immediately transports you without having to hold any keys.
 - **Physical 3D Spacetime Corridor Flight**: Fixed the tunnel wrapping mathematics (`getCardZ()`). Upcoming event cards ($k+1, k+2, k+3\dots$) are positioned directly down the corridor sightline along the negative $Z$-axis ($-38, -64, -90$), physically gliding forward from deep cosmic space.
 - **Mysterious Background Card Blur (No Spoilers)**: Upcoming 3D cards render with multi-tap GLSL bokeh blur (`uBlur = 4.2`) and atmospheric cosmic fog, keeping their details blurred until they fly into primary focus.
 - **Sleek, Minimalist Cinematic HUD**: Free of intrusive preview boxes, presenting an uncluttered widescreen viewport into deep space.
