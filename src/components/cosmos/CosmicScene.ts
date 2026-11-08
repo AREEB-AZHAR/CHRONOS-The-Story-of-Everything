@@ -183,28 +183,36 @@ const SHARD_FRAG = /* glsl */ `
   }
 `;
 
-/* ---------------- star shader ---------------- */
+/* ---------------- star shader with space warp hyperspace streak ---------------- */
 
 const STAR_VERT = /* glsl */ `
   attribute float aSize;
   varying vec3 vColor;
+  varying float vWarp;
   uniform float uPR;
+  uniform float uWarp;
   void main() {
     vColor = color;
+    vWarp = uWarp;
     vec4 mv = modelViewMatrix * vec4(position, 1.0);
-    gl_PointSize = aSize * uPR;
+    // Point size blooms and stretches in warp speed!
+    gl_PointSize = aSize * uPR * (1.0 + uWarp * 2.8);
     gl_Position = projectionMatrix * mv;
   }
 `;
 
 const STAR_FRAG = /* glsl */ `
   varying vec3 vColor;
+  varying float vWarp;
   uniform float uOpacity;
   void main() {
     vec2 c = gl_PointCoord - 0.5;
+    // In warp, elongate particles into motion streak lines along travel axis
+    c.y *= (1.0 + vWarp * 2.4);
     float d = length(c);
-    float a = smoothstep(0.5, 0.08, d);
-    gl_FragColor = vec4(vColor, a * uOpacity);
+    float a = smoothstep(0.5, 0.05, d);
+    vec3 col = mix(vColor, vec3(0.85, 0.95, 1.0), vWarp * 0.7);
+    gl_FragColor = vec4(col, a * uOpacity * (1.0 + vWarp * 0.6));
     #include <colorspace_fragment>
   }
 `;
@@ -263,6 +271,39 @@ export class CosmicScene {
   private inputLocked = false;
   private begun = false;
   private dockedAt = -1; // when the stream last froze on a station (idle linger)
+
+  // space warp hyperspace flight state
+  private warpFlight = {
+    active: false,
+    startStation: 0,
+    targetStation: 0,
+    startScroll: 0,
+    targetScroll: 0,
+    startTime: 0,
+    duration: 1.0,
+    dir: 1,
+  };
+  private warpFactor = 0; // 0..1 smooth hyperspace warp factor
+
+  /**
+   * Calculates dynamic space warp flight duration based on the real cosmic time gap (years)
+   * between the source and destination epochs.
+   * e.g. 5,000 years -> ~0.75s; 8.4 Billion years -> ~2.05s
+   */
+  private getEraWarpDuration(fromIdx: number, toIdx: number): number {
+    const len = this.events.length;
+    const a = this.events[mod(fromIdx, len)];
+    const b = this.events[mod(toIdx, len)];
+    if (!a || !b) return 0.9;
+    const deltaYears = Math.abs(a.yearsAgo - b.yearsAgo);
+
+    const logMin = 3.5; // log10(3,000 years)
+    const logMax = 10.15; // log10(14 Billion years)
+    const logVal = Math.log10(Math.max(deltaYears, 3000));
+    const t = THREE.MathUtils.clamp((logVal - logMin) / (logMax - logMin), 0, 1);
+
+    return THREE.MathUtils.lerp(0.75, 2.05, Math.pow(t, 0.85));
+  }
 
   // focus / interaction
   private focusIdx = 0;
@@ -652,6 +693,7 @@ export class CosmicScene {
       uniforms: {
         uPR: { value: Math.min(window.devicePixelRatio, 1.75) },
         uOpacity: { value: 0.9 },
+        uWarp: { value: 0 },
       },
     });
     this.stars = new THREE.Points(g, this.starsMat);
@@ -694,6 +736,7 @@ export class CosmicScene {
       uniforms: {
         uPR: { value: Math.min(window.devicePixelRatio, 1.75) },
         uOpacity: { value: 0.55 },
+        uWarp: { value: 0 },
       },
     });
     this.dust = new THREE.Points(g, this.dustMat);
@@ -912,27 +955,9 @@ export class CosmicScene {
     }
   };
 
-  private onKeyUp = (e: KeyboardEvent) => {
-    if (
-      e.key === "ArrowDown" ||
-      e.key === "ArrowUp" ||
-      e.key === "ArrowRight" ||
-      e.key === "ArrowLeft" ||
-      e.key === "s" ||
-      e.key === "S" ||
-      e.key === "w" ||
-      e.key === "W"
-    ) {
-      // The instant the user releases the arrow key, immediately stop runaway continuous scroll!
-      // Instantly extinguish residual velocity
-      this.velocity *= 0.12;
-      // Lock targetScroll cleanly to the nearest approaching station
-      const curP = this.scroll - FOCUS_Z;
-      const curStation = curP / GAP;
-      const stopStation = Math.round(curStation);
-      this.targetScroll = stopStation * GAP + FOCUS_Z;
-      this.lastInputAt = performance.now();
-    }
+  private onKeyUp = (_e: KeyboardEvent) => {
+    // Single-click / single-tap section stepping is handled completely by autonomous space warp.
+    // Releasing the key does NOT cancel or snap back an active step.
   };
 
   private onResize = () => {
@@ -966,17 +991,36 @@ export class CosmicScene {
 
   jumpTo(idx: number) {
     if (this.selectedIdx >= 0) this.closeSelection();
-    const arrival = idx * GAP + FOCUS_Z; // scroll at which card idx docks
-    // choose the shortest path around the loop
-    const cur = mod(this.targetScroll, this.loopT);
-    let delta = arrival - cur;
-    if (delta > this.loopT / 2) delta -= this.loopT;
-    if (delta < -this.loopT / 2) delta += this.loopT;
-    this.targetScroll += delta;
+    const curP = this.scroll - FOCUS_Z;
+    const curStation = curP / GAP;
+    const curIdx = mod(Math.round(curStation), this.events.length);
+
+    // Calculate shortest path around the loop
+    let deltaStations = idx - curIdx;
+    const half = this.events.length / 2;
+    if (deltaStations > half) deltaStations -= this.events.length;
+    if (deltaStations < -half) deltaStations += this.events.length;
+
+    const targetStation = Math.round(curStation) + deltaStations;
+    const duration = this.getEraWarpDuration(curIdx, idx);
+    const goalScroll = targetStation * GAP + FOCUS_Z;
+
+    this.warpFlight = {
+      active: true,
+      startStation: curStation,
+      targetStation,
+      startScroll: this.scroll,
+      targetScroll: goalScroll,
+      startTime: performance.now(),
+      duration: Math.max(duration, 0.85),
+      dir: deltaStations >= 0 ? 1 : -1,
+    };
+
+    this.targetScroll = goalScroll;
     this.lastInputAt = performance.now();
   }
 
-  /** Step cleanly section-by-section along the cosmic timeline */
+  /** Step cleanly section-by-section along the cosmic timeline with single-click Space Warp */
   stepSection(dir: number) {
     if (!this.begun) {
       this.begin();
@@ -985,15 +1029,37 @@ export class CosmicScene {
     if (this.selectedIdx >= 0) {
       this.closeSelection();
     }
-    // Calculate current station position from camera position
-    const curStation = (this.scroll - FOCUS_Z) / GAP;
+
+    // Determine current continuous station from camera position
+    const curP = this.scroll - FOCUS_Z;
+    const curStation = curP / GAP;
+
+    // Target station:
+    // If already in warp in the same direction, chain forward by one more station!
     let nextStation: number;
-    if (dir > 0) {
-      nextStation = Math.floor(curStation + 0.12) + 1;
+    if (this.warpFlight.active && Math.sign(this.warpFlight.dir) === Math.sign(dir)) {
+      nextStation = this.warpFlight.targetStation + (dir > 0 ? 1 : -1);
     } else {
-      nextStation = Math.ceil(curStation - 0.12) - 1;
+      nextStation = dir > 0 ? Math.floor(curStation + 0.05) + 1 : Math.ceil(curStation - 0.05) - 1;
     }
-    this.targetScroll = nextStation * GAP + FOCUS_Z;
+
+    const fromIdx = mod(Math.round(curStation), this.events.length);
+    const toIdx = mod(nextStation, this.events.length);
+    const duration = this.getEraWarpDuration(fromIdx, toIdx);
+    const goalScroll = nextStation * GAP + FOCUS_Z;
+
+    this.warpFlight = {
+      active: true,
+      startStation: curStation,
+      targetStation: nextStation,
+      startScroll: this.scroll,
+      targetScroll: goalScroll,
+      startTime: performance.now(),
+      duration,
+      dir: dir > 0 ? 1 : -1,
+    };
+
+    this.targetScroll = goalScroll;
     this.lastInputAt = performance.now();
   }
 
@@ -1053,61 +1119,96 @@ export class CosmicScene {
       }
     }
 
-    /* ---- idle auto-drift: the stream carries you, lingering at each station ---- */
-    const idle = performance.now() - this.lastInputAt > 4000;
-    if (idle && !this.inputLocked && this.selectedIdx < 0 && this.ready && this.begun) {
-      const fDock = this.scroll - FOCUS_Z;
-      const nearestDock = Math.round(fDock / GAP) * GAP;
-      const docked = Math.abs(fDock - nearestDock) < 0.6;
-      if (docked && this.dockedAt < 0) this.dockedAt = performance.now();
-      if (!docked) this.dockedAt = -1;
-      const lingered = this.dockedAt > 0 && performance.now() - this.dockedAt > 8000;
-      if (!docked || lingered) this.targetScroll += 2.1 * dt;
-    }
+    /* ---- space warp active flight execution ---- */
+    if (this.warpFlight.active) {
+      const elapsed = (performance.now() - this.warpFlight.startTime) / 1000;
+      const progress = Math.min(1.0, elapsed / Math.max(this.warpFlight.duration, 0.1));
 
-    /* ---- magnetic docking: gently settle onto the nearest station when scroll eases or pauses ---- */
-    const timeSinceInput = performance.now() - this.lastInputAt;
-    const pScroll = this.scroll - FOCUS_Z;
-    const pDockOffset = mod(pScroll + GAP * 0.5, GAP) - GAP * 0.5;
-    const distToStation = Math.abs(pDockOffset);
+      // Quintic S-curve warp profile: punchy acceleration -> hyper-speed cruise -> cushioned drop-out
+      const ease =
+        progress < 0.5
+          ? 16 * Math.pow(progress, 5)
+          : 1 - Math.pow(-2 * progress + 2, 5) / 2;
 
-    if (
-      this.ready &&
-      !this.inputLocked &&
-      this.selectedIdx < 0 &&
-      this.begun &&
-      timeSinceInput > 200 &&
-      Math.abs(this.velocity) < 6.5
-    ) {
-      const nearestDock = Math.round(pScroll / GAP) * GAP;
-      const deltaDock = nearestDock - pScroll;
-      if (Math.abs(deltaDock) < GAP * 0.44) {
-        const pull = Math.min(1.0, 5.0 * dt);
-        const dockTarget = nearestDock + FOCUS_Z;
-        this.targetScroll += (dockTarget - this.targetScroll) * pull;
+      const prevScroll = this.scroll;
+      this.scroll =
+        this.warpFlight.startScroll +
+        (this.warpFlight.targetScroll - this.warpFlight.startScroll) * ease;
+      this.targetScroll = this.scroll;
+
+      // Peak warp factor is high in the middle of flight:
+      const rawWarp = Math.sin(progress * Math.PI);
+      this.warpFactor = Math.pow(rawWarp, 1.35);
+
+      // Instantaneous warp velocity for effects
+      const instV = (this.scroll - prevScroll) / Math.max(dt, 1e-4);
+      this.velocity = instV;
+
+      if (progress >= 1.0) {
+        this.scroll = this.warpFlight.targetScroll;
+        this.targetScroll = this.warpFlight.targetScroll;
+        this.warpFlight.active = false;
+        this.velocity = 0;
       }
+    } else {
+      // Warp factor decays smoothly to zero when not warping
+      this.warpFactor += (0 - this.warpFactor) * 0.12;
+
+      /* ---- idle auto-drift: the stream carries you, lingering at each station ---- */
+      const idle = performance.now() - this.lastInputAt > 4000;
+      if (idle && !this.inputLocked && this.selectedIdx < 0 && this.ready && this.begun) {
+        const fDock = this.scroll - FOCUS_Z;
+        const nearestDock = Math.round(fDock / GAP) * GAP;
+        const docked = Math.abs(fDock - nearestDock) < 0.6;
+        if (docked && this.dockedAt < 0) this.dockedAt = performance.now();
+        if (!docked) this.dockedAt = -1;
+        const lingered = this.dockedAt > 0 && performance.now() - this.dockedAt > 8000;
+        if (!docked || lingered) this.targetScroll += 2.1 * dt;
+      }
+
+      /* ---- magnetic docking: gently settle onto the nearest station when scroll eases or pauses ---- */
+      const timeSinceInput = performance.now() - this.lastInputAt;
+      const pScroll = this.scroll - FOCUS_Z;
+      const pDockOffset = mod(pScroll + GAP * 0.5, GAP) - GAP * 0.5;
+      const distToStation = Math.abs(pDockOffset);
+
+      if (
+        this.ready &&
+        !this.inputLocked &&
+        this.selectedIdx < 0 &&
+        this.begun &&
+        timeSinceInput > 200 &&
+        Math.abs(this.velocity) < 6.5
+      ) {
+        const nearestDock = Math.round(pScroll / GAP) * GAP;
+        const deltaDock = nearestDock - pScroll;
+        if (Math.abs(deltaDock) < GAP * 0.44) {
+          const pull = Math.min(1.0, 5.0 * dt);
+          const dockTarget = nearestDock + FOCUS_Z;
+          this.targetScroll += (dockTarget - this.targetScroll) * pull;
+        }
+      }
+
+      /* ---- smooth scroll + velocity with event section approach braking ---- */
+      const pScrollNow = this.scroll - FOCUS_Z;
+      const pDockOffsetNow = mod(pScrollNow + GAP * 0.5, GAP) - GAP * 0.5;
+      const distToStationNow = Math.abs(pDockOffsetNow);
+      const approachRadius = 8.5;
+      const approachFactor = Math.max(0, 1 - distToStationNow / approachRadius);
+
+      const lerpRate = THREE.MathUtils.lerp(14.0, 8.5, approachFactor);
+      const lerpAlpha = 1 - Math.exp(-lerpRate * dt);
+      const maxSpeed = THREE.MathUtils.lerp(50.0, 18.0, Math.pow(approachFactor, 1.2));
+      const maxDelta = maxSpeed * dt;
+
+      const prev = this.scroll;
+      let step = (this.targetScroll - this.scroll) * lerpAlpha;
+      step = THREE.MathUtils.clamp(step, -maxDelta, maxDelta);
+      this.scroll += step;
+
+      const instV = (this.scroll - prev) / Math.max(dt, 1e-4);
+      this.velocity += (instV - this.velocity) * 0.16;
     }
-
-    /* ---- smooth scroll + velocity with event section approach braking ---- */
-    // As a new event section approaches (distToStation < 8.5), smoothly cushion velocity and spring
-    const approachRadius = 8.5;
-    const approachFactor = Math.max(0, 1 - distToStation / approachRadius);
-
-    // Spring rate: responsive in deep void (14.0) down to cushioned (8.5) near event dock
-    const lerpRate = THREE.MathUtils.lerp(14.0, 8.5, approachFactor);
-    const lerpAlpha = 1 - Math.exp(-lerpRate * dt);
-
-    // Speed ceiling: allows snappy, decisive station changes (~450ms) while cushioning on arrival
-    const maxSpeed = THREE.MathUtils.lerp(50.0, 18.0, Math.pow(approachFactor, 1.2));
-    const maxDelta = maxSpeed * dt;
-
-    const prev = this.scroll;
-    let step = (this.targetScroll - this.scroll) * lerpAlpha;
-    step = THREE.MathUtils.clamp(step, -maxDelta, maxDelta);
-    this.scroll += step;
-
-    const instV = (this.scroll - prev) / Math.max(dt, 1e-4);
-    this.velocity += (instV - this.velocity) * 0.16;
     const speed = Math.abs(this.velocity);
 
     /* ---- galaxy swirl ---- */
@@ -1158,12 +1259,26 @@ export class CosmicScene {
     // Look straight down the spacetime tunnel corridor (-40) so the entire avenue of future cards is visible
     this.camera.lookAt(this.lookCur.x * 0.4, this.lookCur.y * 0.4, -40);
 
-    /* ---- FOV kick with speed ---- */
-    const fovTarget = 68 + Math.min(speed * 0.55, 13);
-    if (Math.abs(this.camera.fov - fovTarget) > 0.05) {
-      this.camera.fov += (fovTarget - this.camera.fov) * 0.08;
+    /* ---- space warp star uniforms, FOV distortion, and relativistic vibration ---- */
+    if (this.starsMat) {
+      this.starsMat.uniforms.uWarp.value = this.warpFactor;
+    }
+    if (this.dustMat) {
+      this.dustMat.uniforms.uWarp.value = this.warpFactor;
+    }
+
+    // Dynamic FOV: Standard 68°, expanding outward to 94° in hyperspace warp!
+    const warpFovTarget = 68 + this.warpFactor * 26 + Math.min(speed * 0.35, 10);
+    if (Math.abs(this.camera.fov - warpFovTarget) > 0.05) {
+      this.camera.fov += (warpFovTarget - this.camera.fov) * 0.14;
       this.camera.updateProjectionMatrix();
     }
+
+    // Relativistic cockpit vibration during peak hyperspace cruise
+    const warpShakeX = (Math.sin(t * 53.0) + Math.cos(t * 89.0)) * 0.06 * this.warpFactor;
+    const warpShakeY = (Math.cos(t * 61.0) + Math.sin(t * 79.0)) * 0.05 * this.warpFactor;
+    this.camera.position.x = warpShakeX;
+    this.camera.position.y = warpShakeY;
 
     /* ---- hover raycast (throttled) ---- */
     if (this.ready && this.pointerInside && this.frameCount % 2 === 0 && this.selectedIdx < 0) {

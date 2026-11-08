@@ -9,11 +9,19 @@ An interactive, cinematic 3D scroll-through-time web experience taking you on a 
 CHRONOS is an immersive timeline experience built using **Next.js 16**, **React 19**, **Three.js (r186+)**, and **Tailwind CSS v4**.
 
 ### Key Highlights & Recent Updates
-- **Physical 3D Spacetime Corridor Flight**: Fixed the tunnel wrapping mathematics (`getCardZ()`). Upcoming event cards ($k+1, k+2, k+3\dots$) are now positioned directly down the corridor sightline along the negative $Z$-axis ($-38, -64, -90$). As you scroll forward, cards physically glide straight towards you from deep cosmic space rather than popping into existence out of nowhere.
-- **Mysterious Background Card Blur (No Spoilers)**: Upcoming 3D cards in the background corridor render with a multi-tap GLSL bokeh blur (`uBlur = 4.2`) and atmospheric cosmic fog. Their luminous presence and palette are visible in deep space, but their text and intricate details remain mysterious and blurred until they fly into primary focus.
-- **Sleek, Minimalist Cinematic HUD**: Removed intrusive preview boxes from the HUD. The user experiences upcoming timelines purely and immersively within the 3D WebGL world itself.
-- **Instant Arrow Key Braking & Repeat Throttling**: Fixed runaway continuous momentum when pressing or holding arrow keys. Long-press repeat is throttled to a clean 380ms cadence, and releasing the key immediately extinguishes residual velocity (`velocity *= 0.12`) and docks squarely onto the immediate approaching station.
-- **Brisk, Cushioned Station Transitions**: Tuned transit speed ceilings and lerp springs so stepping between eras takes ~450ms with a graceful, cushioned magnetic settle at each station dock.
+- **Single-Click Space Warp Navigation**: Tapping `↓` (Arrow Down / `S`), `↑` (Arrow Up / `W`), or clicking any moment in the drawer immediately initiates an autonomous **Space Warp** flight to the destination epoch. No holding down keys required — a single click effortlessly transports you across deep spacetime!
+- **Travel Time Scaled to Cosmic Time Distance**: The duration of your hyperspace warp flight directly reflects the real temporal chasm between epochs ($\Delta\text{years}$):
+  - *Small historical jumps* (e.g. thousands of years in civilization): snappy $\approx 0.75\text{s}$ warp flash.
+  - *Medium evolutionary steps* (e.g. tens to hundreds of millions of years): $\approx 1.1\text{s} - 1.4\text{s}$ warp flight.
+  - *Colossal cosmic chasms* (e.g. **8.4 Billion years** between *Galaxies Assemble* and *The Sun Ignites*): epic $\approx 2.05\text{s}$ hyperspace plunge across the cosmic abyss.
+- **Hyperspace Space Warp Visual FX**:
+  - **Dynamic Relativistic FOV Expansion**: Camera FOV swells dynamically from $68^\circ$ up to $95^\circ$ during hyperspace cruise and snaps back cleanly on arrival.
+  - **Relativistic Star Streaks**: In `STAR_VERT` and `STAR_FRAG`, particle points bloom and stretch vertically along the travel vector with an intense cyan-white hyper-luminescent sheen.
+  - **Relativistic Cockpit Vibration**: Subtle micro-tremors (50–80Hz) proportional to the warp factor simulate high-velocity spacetime transit.
+  - **Quintic S-Curve Motion Profile**: Punchy acceleration into hyperspace $\to$ hyper-velocity cruise $\to$ cushioned, pristine drop-out squarely at the destination era dock.
+- **Physical 3D Spacetime Corridor Flight**: Fixed the tunnel wrapping mathematics (`getCardZ()`). Upcoming event cards ($k+1, k+2, k+3\dots$) are positioned directly down the corridor sightline along the negative $Z$-axis ($-38, -64, -90$), physically gliding forward from deep cosmic space.
+- **Mysterious Background Card Blur (No Spoilers)**: Upcoming 3D cards render with multi-tap GLSL bokeh blur (`uBlur = 4.2`) and atmospheric cosmic fog, keeping their details blurred until they fly into primary focus.
+- **Sleek, Minimalist Cinematic HUD**: Free of intrusive preview boxes, presenting an uncluttered widescreen viewport into deep space.
 - **Continuous Event Arrival & Organic Emergence**: Replaced abrupt card pop-in with continuous Gaussian focus proximity. Approaching era cards smoothly bloom, swell in scale (`0.90x` to `1.20x`), awaken in luminance, and illuminate into crisp focus without sudden state jumps.
 - **Cinematic Video Landing Page**: The intro screen (`Intro.tsx`) features a looping high-definition cosmic particle video background (`/cosmos/space-bg.mp4`), multilayered radial vignettes, celestial astrolabe motion, and instant keyboard launch via `Space`, `Enter`, or `↓`.
 - **Bespoke Chronos Celestial Logo (`public/logo.svg`)**: Custom-crafted vector insignia featuring intertwined armillary orbits, a luminous singularity core, and 12 epoch celestial dials.
