@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import type { TimelineEvent } from "@/data/timeline";
-import { TIMELINE, TOTAL_EVENTS } from "@/data/timeline";
+import { TOTAL_EVENTS } from "@/data/timeline";
 
 export interface HudRefProps {
   yearBigRef: React.RefObject<HTMLSpanElement | null>;
@@ -137,87 +137,36 @@ export default function Hud({
       </header>
 
       {/* ============ bottom-left editorial block ============ */}
-      {(() => {
-        const prevIdx = (era.index - 1 + TOTAL_EVENTS) % TOTAL_EVENTS;
-        const nextIdx = (era.index + 1) % TOTAL_EVENTS;
-        const prevEra = TIMELINE[prevIdx];
-        const nextEra = TIMELINE[nextIdx];
-
-        return (
-          <div className="absolute bottom-24 left-5 max-w-[76vw] sm:bottom-8 sm:left-7 sm:max-w-md pointer-events-auto">
-            {/* Subtle blurred glimpse of surrounding timelines */}
-            <div className="mb-2.5 flex items-center gap-3 font-mono text-[9px] tracking-[0.22em] text-white/35">
-              {prevEra && (
-                <span className="flex items-center gap-1 opacity-60 filter blur-[1px] select-none transition-all">
-                  <span className="text-[8px] text-emerald-400/50">‹</span>
-                  <span className="max-w-[85px] truncate sm:max-w-[110px]">{prevEra.title}</span>
-                </span>
-              )}
-              <span className="text-white/20">|</span>
-              <span className="font-semibold text-emerald-300/90 tracking-[0.28em]">
-                <span ref={idxRef} /> / {TOTAL_EVENTS}
-              </span>
-              <span className="text-white/20">|</span>
-              {nextEra && (
-                <span className="flex items-center gap-1 opacity-60 filter blur-[1.2px] select-none transition-all">
-                  <span className="max-w-[85px] truncate sm:max-w-[110px]">{nextEra.title}</span>
-                  <span className="text-[8px] text-cyan-400/50">›</span>
-                </span>
-              )}
-            </div>
-
-            {/* Active Era Editorial: Smooth cross-dissolve & blur resolution */}
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={era.id}
-                initial={{ opacity: 0, y: 14, filter: "blur(10px)" }}
-                animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-                exit={{ opacity: 0, y: -10, filter: "blur(8px)" }}
-                transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
-              >
-                <h2 className="era-title font-display text-3xl font-light italic leading-tight text-white sm:text-4xl drop-shadow-[0_2px_24px_rgba(0,0,0,0.85)]">
-                  {era.title}
-                </h2>
-                <div className="mt-2 flex items-center gap-2 font-mono text-[10px] tracking-[0.2em] text-white/50">
-                  <span className="rounded-full border border-emerald-400/25 bg-emerald-950/30 px-2 py-0.5 text-emerald-300/90">
-                    {era.category}
-                  </span>
-                  <span>·</span>
-                  <span>{era.yearLabel.toUpperCase()}</span>
-                </div>
-              </motion.div>
-            </AnimatePresence>
-          </div>
-        );
-      })()}
-
-      {/* ============ bottom-right: Future Horizons & Controls ============ */}
-      <div className="absolute bottom-24 right-5 hidden flex-col items-end gap-3 sm:bottom-8 sm:right-7 sm:flex pointer-events-auto">
-        {/* Approaching Future Horizons preview in the background (blurred) */}
-        <div className="flex flex-col items-end gap-1.5 rounded-2xl border border-white/10 bg-white/[0.02] p-3 backdrop-blur-md">
-          <p className="font-mono text-[8px] tracking-[0.3em] text-white/40 uppercase">
-            Approaching Horizons
-          </p>
-          <div className="flex items-center gap-2 mt-1">
-            {/* Next epoch +1 (blurred glimpse) */}
-            <div className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-2.5 py-1.5 filter blur-[1px] select-none transition-all">
-              <span className="font-mono text-[9px] text-emerald-300/80">+{1}</span>
-              <div className="flex flex-col text-right">
-                <span className="font-mono text-[10px] text-white/80 max-w-[110px] truncate">{TIMELINE[(era.index + 1) % TOTAL_EVENTS]?.title}</span>
-                <span className="font-mono text-[8px] text-white/40">{TIMELINE[(era.index + 1) % TOTAL_EVENTS]?.yearLabel}</span>
-              </div>
-            </div>
-            {/* Next epoch +2 (deeper blur) */}
-            <div className="flex items-center gap-2 rounded-xl border border-white/5 bg-white/[0.015] px-2.5 py-1.5 filter blur-[2px] select-none transition-all">
-              <span className="font-mono text-[9px] text-cyan-300/60">+{2}</span>
-              <div className="flex flex-col text-right">
-                <span className="font-mono text-[10px] text-white/60 max-w-[100px] truncate">{TIMELINE[(era.index + 2) % TOTAL_EVENTS]?.title}</span>
-                <span className="font-mono text-[8px] text-white/30">{TIMELINE[(era.index + 2) % TOTAL_EVENTS]?.yearLabel}</span>
-              </div>
-            </div>
-          </div>
+      <div className="absolute bottom-24 left-5 max-w-[76vw] sm:bottom-8 sm:left-7 sm:max-w-md pointer-events-auto">
+        <div className="mb-2 font-mono text-[10px] tracking-[0.25em] text-emerald-400/80">
+          <span ref={idxRef} /> / {TOTAL_EVENTS}
         </div>
 
+        {/* Active Era Editorial: Smooth cross-dissolve & blur resolution */}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={era.id}
+            initial={{ opacity: 0, y: 14, filter: "blur(10px)" }}
+            animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+            exit={{ opacity: 0, y: -10, filter: "blur(8px)" }}
+            transition={{ duration: 0.55, ease: [0.16, 1, 0.3, 1] }}
+          >
+            <h2 className="era-title font-display text-3xl font-light italic leading-tight text-white sm:text-4xl drop-shadow-[0_2px_24px_rgba(0,0,0,0.85)]">
+              {era.title}
+            </h2>
+            <div className="mt-2 flex items-center gap-2 font-mono text-[10px] tracking-[0.2em] text-white/50">
+              <span className="rounded-full border border-emerald-400/25 bg-emerald-950/30 px-2 py-0.5 text-emerald-300/90">
+                {era.category}
+              </span>
+              <span>·</span>
+              <span>{era.yearLabel.toUpperCase()}</span>
+            </div>
+          </motion.div>
+        </AnimatePresence>
+      </div>
+
+      {/* ============ bottom-right: Controls ============ */}
+      <div className="absolute bottom-24 right-5 hidden flex-col items-end gap-3 sm:bottom-8 sm:right-7 sm:flex pointer-events-auto">
         <button onClick={onBackToStart} className="glass-pill group flex items-center gap-2.5">
           <span className="grid size-5 place-items-center rounded-full bg-white/10 transition-colors group-hover:bg-white/20">
             <svg width="8" height="8" viewBox="0 0 8 8" fill="none" className="rotate-180">

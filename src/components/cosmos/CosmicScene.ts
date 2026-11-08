@@ -11,7 +11,7 @@ import type { TimelineEvent } from "@/data/timeline";
 
 const GAP = 26; // distance between era stations along the tunnel
 const FOCUS_Z = -12; // where a card "docks" in front of the camera
-const BEHIND = 16; // how far past the camera cards linger before wrapping
+const BEHIND = 24; // how far past the camera cards linger before wrapping
 const CARD_W = 1.75;
 const CARD_H = 1;
 
@@ -81,24 +81,24 @@ const CARD_FRAG = /* glsl */ `
     if (blur < 0.05) {
       return texture2D(map, uv).rgb;
     }
-    // Multi-tap weighted Poisson / cross sample with LOD for cinematic depth blur
-    float lod = blur * 1.5;
-    vec2 off = vec2(blur * 0.006, blur * 0.006);
-    #if __VERSION__ >= 300
-      vec3 col = textureLod(map, uv, lod).rgb * 0.32;
-      col += textureLod(map, uv + vec2(off.x, 0.0), lod).rgb * 0.17;
-      col += textureLod(map, uv - vec2(off.x, 0.0), lod).rgb * 0.17;
-      col += textureLod(map, uv + vec2(0.0, off.y), lod).rgb * 0.17;
-      col += textureLod(map, uv - vec2(0.0, off.y), lod).rgb * 0.17;
-      return col;
-    #else
-      vec3 col = texture2D(map, uv).rgb * 0.32;
-      col += texture2D(map, uv + vec2(off.x, 0.0)).rgb * 0.17;
-      col += texture2D(map, uv - vec2(off.x, 0.0)).rgb * 0.17;
-      col += texture2D(map, uv + vec2(0.0, off.y)).rgb * 0.17;
-      col += texture2D(map, uv - vec2(0.0, off.y)).rgb * 0.17;
-      return col;
-    #endif
+    // High-performance multi-tap bokeh blur for mysterious background timeline glimpse
+    float r = blur * 0.009;
+    vec3 col = texture2D(map, uv).rgb * 0.24;
+    col += texture2D(map, uv + vec2( r,  0.0)).rgb * 0.11;
+    col += texture2D(map, uv - vec2( r,  0.0)).rgb * 0.11;
+    col += texture2D(map, uv + vec2(0.0,  r )).rgb * 0.11;
+    col += texture2D(map, uv - vec2(0.0,  r )).rgb * 0.11;
+    col += texture2D(map, uv + vec2( r * 0.72,  r * 0.72)).rgb * 0.08;
+    col += texture2D(map, uv + vec2(-r * 0.72,  r * 0.72)).rgb * 0.08;
+    col += texture2D(map, uv + vec2( r * 0.72, -r * 0.72)).rgb * 0.08;
+    col += texture2D(map, uv + vec2(-r * 0.72, -r * 0.72)).rgb * 0.08;
+    // Outer perimeter taps for pronounced, dreamy silhouette
+    float r2 = r * 1.85;
+    col += texture2D(map, uv + vec2( r2,  0.0)).rgb * 0.02;
+    col += texture2D(map, uv - vec2( r2,  0.0)).rgb * 0.02;
+    col += texture2D(map, uv + vec2(0.0,  r2)).rgb * 0.02;
+    col += texture2D(map, uv - vec2(0.0, -r2)).rgb * 0.02;
+    return col;
   }
 
   void main() {
@@ -127,12 +127,12 @@ const CARD_FRAG = /* glsl */ `
 
     // Atmospheric cosmic fog: distant background timelines melt into the void
     float viewDist = length(vViewPos);
-    float fogFactor = smoothstep(35.0, 150.0, viewDist);
-    vec3 fogColor = vec3(0.02, 0.01, 0.03);
+    float fogFactor = smoothstep(45.0, 180.0, viewDist);
+    vec3 fogColor = vec3(0.02, 0.015, 0.035);
     col = mix(col, fogColor, fogFactor * 0.82);
 
     // Fade opacity at extreme distance so cards never abruptly pop when entering view frustum
-    float distFade = 1.0 - smoothstep(110.0, 180.0, viewDist);
+    float distFade = 1.0 - smoothstep(130.0, 220.0, viewDist);
     float finalAlpha = alpha * uOpacity * distFade;
     if (finalAlpha < 0.01) discard;
 
@@ -300,6 +300,17 @@ export class CosmicScene {
   private fpsSamples: number[] = [];
   private qualityChecked = false;
   private prCap = 1.75; // pixel-ratio ceiling, lowered for weak GPUs
+  private keyRepeatAt = 0;
+
+  /**
+   * Spacetime tunnel Z-coordinate:
+   * When station k is docked, its Z is FOCUS_Z (-12).
+   * Stations k+1, k+2, k+3 stretch deep into the forward corridor along negative Z (-38, -64, -90).
+   * Stations that pass behind the camera wrap seamlessly at +BEHIND to the deep cosmic background (-756).
+   */
+  private getCardZ(station: number): number {
+    return mod(this.scroll - station - BEHIND, this.loopT) - this.loopT + BEHIND;
+  }
 
   constructor(canvas: HTMLCanvasElement, events: TimelineEvent[], cb: CosmicSceneCallbacks) {
     this.canvas = canvas;
@@ -436,12 +447,13 @@ export class CosmicScene {
     const geo = new THREE.PlaneGeometry(CARD_W, CARD_H, 1, 1);
 
     this.events.forEach((ev, i) => {
-      // Gentle continuous helical ribbon down the spacetime tunnel (~25 deg per station)
-      // Future upcoming cards are clearly visible stretching down the corridor ahead!
-      const angle = i * 0.44;
-      const radius = 4.6 + Math.sin(i * 0.8) * 0.9;
-      const yOff = Math.sin(i * 0.6) * 1.4;
-      const baseScale = 3.2 + (i % 2 === 0 ? 0.25 : 0.0);
+      // Alternating gallery along the spacetime corridor
+      // Left/right staggered so future upcoming cards are always clearly visible down the sightline
+      const side = i % 2 === 0 ? 1 : -1;
+      const angle = (side > 0 ? 0.32 : Math.PI - 0.32) + Math.sin(i * 0.75) * 0.12;
+      const radius = 4.3 + (i % 3 === 0 ? 0.35 : 0.0);
+      const yOff = (side > 0 ? 0.3 : -0.3) + Math.sin(i * 0.6) * 0.4;
+      const baseScale = 3.2 + (i % 2 === 0 ? 0.15 : 0.0);
 
       const tex = texs[i] ?? makePlaceholderTexture(ev.palette.nebula);
       const mat = new THREE.ShaderMaterial({
@@ -460,6 +472,7 @@ export class CosmicScene {
         },
       });
       const mesh = new THREE.Mesh(geo, mat);
+      mesh.frustumCulled = false;
       mesh.scale.setScalar(baseScale);
       this.world.add(mesh);
       this.cardMeshes.push(mesh);
@@ -790,7 +803,7 @@ export class CosmicScene {
     const candidates: THREE.Mesh[] = [];
     for (let i = 0; i < this.cards.length; i++) {
       const rig = this.cards[i];
-      const cz = mod(this.scroll - rig.station + BEHIND, this.loopT) - BEHIND;
+      const cz = this.getCardZ(rig.station);
       if (cz > -70 && cz < 4 && !rig.free) candidates.push(rig.mesh);
     }
     const hits = this.raycaster.intersectObjects(candidates, false);
@@ -838,8 +851,6 @@ export class CosmicScene {
 
     if (this.inputLocked) return;
 
-    // Throttle long-press key repeat: if user is holding down key and targetScroll is already
-    // leading current camera position by more than 0.75 stations, ignore repeated events!
     const isArrow =
       e.key === "ArrowDown" ||
       e.key === "ArrowUp" ||
@@ -850,12 +861,17 @@ export class CosmicScene {
       e.key === "w" ||
       e.key === "W";
 
-    if (e.repeat && isArrow) {
-      const lead = Math.abs(this.targetScroll - this.scroll);
-      if (lead > GAP * 0.75) {
-        e.preventDefault();
-        return;
+    if (isArrow) {
+      const now = performance.now();
+      // Throttle key repeat when held down: step deliberately once every 380ms
+      // rather than spamming unbuffered events every 30ms!
+      if (e.repeat) {
+        if (now - this.keyRepeatAt < 380) {
+          e.preventDefault();
+          return;
+        }
       }
+      this.keyRepeatAt = now;
     }
 
     switch (e.key) {
@@ -907,18 +923,13 @@ export class CosmicScene {
       e.key === "w" ||
       e.key === "W"
     ) {
-      // The instant the user releases the arrow key, halt runaway continuous scroll!
-      // Immediately snap targetScroll to the very next station directly in front of camera
+      // The instant the user releases the arrow key, immediately stop runaway continuous scroll!
+      // Instantly extinguish residual velocity
+      this.velocity *= 0.12;
+      // Lock targetScroll cleanly to the nearest approaching station
       const curP = this.scroll - FOCUS_Z;
       const curStation = curP / GAP;
-      let stopStation: number;
-      if (this.velocity >= 0.25) {
-        stopStation = Math.ceil(curStation);
-      } else if (this.velocity <= -0.25) {
-        stopStation = Math.floor(curStation);
-      } else {
-        stopStation = Math.round(curStation);
-      }
+      const stopStation = Math.round(curStation);
       this.targetScroll = stopStation * GAP + FOCUS_Z;
       this.lastInputAt = performance.now();
     }
@@ -974,24 +985,15 @@ export class CosmicScene {
     if (this.selectedIdx >= 0) {
       this.closeSelection();
     }
-    // Prevent piling up steps while holding key:
-    // If targetScroll is already leading the camera in the travel direction by > 0.85 stations, wait!
-    const currentLead = (this.targetScroll - this.scroll) * (dir > 0 ? 1 : -1);
-    if (currentLead > GAP * 0.85) {
-      return;
-    }
-    // Calculate continuous station index based on current target position
-    // (station k docks when targetScroll = k * GAP + FOCUS_Z)
-    const curStation = (this.targetScroll - FOCUS_Z) / GAP;
-    let targetStation: number;
+    // Calculate current station position from camera position
+    const curStation = (this.scroll - FOCUS_Z) / GAP;
+    let nextStation: number;
     if (dir > 0) {
-      // Step forward to next integer station
-      targetStation = Math.floor(curStation + 0.08) + dir;
+      nextStation = Math.floor(curStation + 0.12) + 1;
     } else {
-      // Step backward to previous integer station
-      targetStation = Math.ceil(curStation - 0.08) + dir;
+      nextStation = Math.ceil(curStation - 0.12) - 1;
     }
-    this.targetScroll = targetStation * GAP + FOCUS_Z;
+    this.targetScroll = nextStation * GAP + FOCUS_Z;
     this.lastInputAt = performance.now();
   }
 
@@ -1091,12 +1093,12 @@ export class CosmicScene {
     const approachRadius = 8.5;
     const approachFactor = Math.max(0, 1 - distToStation / approachRadius);
 
-    // Spring rate: responsive in deep void (11.5) down to cushioned (5.8) near event dock
-    const lerpRate = THREE.MathUtils.lerp(11.5, 5.8, approachFactor);
+    // Spring rate: responsive in deep void (14.0) down to cushioned (8.5) near event dock
+    const lerpRate = THREE.MathUtils.lerp(14.0, 8.5, approachFactor);
     const lerpAlpha = 1 - Math.exp(-lerpRate * dt);
 
-    // Speed ceiling: drops from 32.0 u/s down to 10.0 u/s when an event section approaches
-    const maxSpeed = THREE.MathUtils.lerp(32.0, 10.0, Math.pow(approachFactor, 1.2));
+    // Speed ceiling: allows snappy, decisive station changes (~450ms) while cushioning on arrival
+    const maxSpeed = THREE.MathUtils.lerp(50.0, 18.0, Math.pow(approachFactor, 1.2));
     const maxDelta = maxSpeed * dt;
 
     const prev = this.scroll;
@@ -1138,13 +1140,13 @@ export class CosmicScene {
     if (this.ready && this.cards.length) {
       const rig = this.cards[rawIdx];
       if (rig) {
-        const cz = mod(this.scroll - rig.station + BEHIND, this.loopT) - BEHIND;
+        const cz = this.getCardZ(rig.station);
         if (cz > -60 && cz < BEHIND && this.selectedIdx < 0) {
           const wp = this.tmpV
             .set(Math.cos(rig.angle) * rig.radius, rig.yOff, cz)
             .applyAxisAngle(CosmicScene.Z_AXIS, swirl);
-          lookX = lookX * 0.4 + wp.x * 0.55;
-          lookY = lookY * 0.4 + wp.y * 0.5;
+          lookX = lookX * 0.4 + wp.x * 0.38;
+          lookY = lookY * 0.4 + wp.y * 0.38;
         }
       }
     }
@@ -1153,8 +1155,8 @@ export class CosmicScene {
     const rollTarget = THREE.MathUtils.clamp(this.velocity * 0.006, -0.16, 0.16);
     this.rollCur += (rollTarget - this.rollCur) * 0.05;
     this.camera.up.set(Math.sin(this.rollCur), Math.cos(this.rollCur), 0);
-    // Look down the spacetime tunnel corridor (-34) so future coming events are clearly visible in the background
-    this.camera.lookAt(this.lookCur.x * 0.5, this.lookCur.y * 0.5, -34);
+    // Look straight down the spacetime tunnel corridor (-40) so the entire avenue of future cards is visible
+    this.camera.lookAt(this.lookCur.x * 0.4, this.lookCur.y * 0.4, -40);
 
     /* ---- FOV kick with speed ---- */
     const fovTarget = 68 + Math.min(speed * 0.55, 13);
@@ -1169,7 +1171,7 @@ export class CosmicScene {
       const candidates: THREE.Mesh[] = [];
       for (let i = 0; i < this.cards.length; i++) {
         const rig = this.cards[i];
-        const cz = mod(this.scroll - rig.station + BEHIND, this.loopT) - BEHIND;
+        const cz = this.getCardZ(rig.station);
         if (cz > -70 && cz < 4 && !rig.free) candidates.push(rig.mesh);
       }
       const hits = this.raycaster.intersectObjects(candidates, false);
@@ -1190,7 +1192,7 @@ export class CosmicScene {
         const isHover = i === this.hoveredIdx;
         const isSel = i === this.selectedIdx;
 
-        const cz = mod(this.scroll - rig.station + BEHIND, this.loopT) - BEHIND;
+        const cz = this.getCardZ(rig.station);
 
         if (rig.free) {
           // ---- selected / returning: manual control ----
@@ -1231,7 +1233,7 @@ export class CosmicScene {
             rig.dim += (0.75 - rig.dim) * 0.1;
             rig.border *= 0.9;
             rig.sheen *= 0.9;
-            rig.blur += (3.5 - rig.blur) * 0.1;
+            rig.blur += (3.8 - rig.blur) * 0.1;
           }
           rig.mesh.rotateZ(Math.sin(t * 0.5 + rig.phase) * 0.0035);
         } else {
@@ -1248,19 +1250,19 @@ export class CosmicScene {
 
           // Continuous focus proximity based on exact distance to docking station (FOCUS_Z)
           const distToDock = Math.abs(cz - FOCUS_Z);
-          const focusInfluence = 15.0; // units of focus capture zone
+          const focusInfluence = 16.0; // units of focus capture zone
           const focusFactor = Math.max(0, 1.0 - Math.pow(distToDock / focusInfluence, 1.6));
 
-          // When in background, blur is high (3.8), keeping other timelines soft & mysterious.
+          // When in background, blur is high (4.2), keeping other timelines soft & mysterious.
           // As a card comes into view towards dock, blur smoothly dissolves to 0.0!
-          let tBlur = THREE.MathUtils.lerp(3.8, 0.0, Math.pow(focusFactor, 1.2));
+          let tBlur = THREE.MathUtils.lerp(4.2, 0.0, Math.pow(focusFactor, 1.2));
 
-          // Dynamic scale: background cards are subtle (0.92x), swelling to 1.20x at focus
-          let tScale = rig.baseScale * (0.92 + 0.28 * focusFactor);
+          // Dynamic scale: background cards are subtle (0.90x), swelling to 1.20x at focus
+          let tScale = rig.baseScale * (0.90 + 0.30 * focusFactor);
 
-          // Luminance: background cards are softly dimmed (0.28) so they don't overpower,
+          // Luminance: background cards are softly dimmed (0.30) so they don't overpower,
           // glowing to full brilliance (1.05) when in focus
-          let tDim = 0.28 + 0.77 * focusFactor;
+          let tDim = 0.30 + 0.75 * focusFactor;
 
           // Glowing border: swells organically as the card approaches the focus dock
           let tBorder = Math.pow(focusFactor, 1.5);
