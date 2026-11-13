@@ -9,6 +9,10 @@ An interactive, cinematic 3D scroll-through-time web experience taking you on a 
 CHRONOS is an immersive timeline experience built using **Next.js 16**, **React 19**, **Three.js (r186+)**, and **Tailwind CSS v4**.
 
 ### Key Highlights & Recent Updates
+- **Security & Git History Sanitization**:
+  - Executed full repository security audit and history purification with `git-filter-repo`.
+  - Purged all uncommitted/early environment configuration leaks (`.env`) from repository history.
+  - Hardened `.gitignore` to guarantee local environment secrets and runtime files remain protected against accidental commits.
 - **Direct Background Card Click Warp**: Clicking any distant background 3D card visible along the corridor sightline instantly engages hyperspace Space Warp directly to that timeline era! Clicking the docked foreground card opens its in-depth exploration sheet.
 - **Mobile UI Experience & Readability Overhaul**:
   - **Zero Text Collisions**: The HUD bottom-left editorial block (`"01 / 30"`, `"The Big Bang"`, `"COSMIC ORIGIN · 13.8 BILLION YEARS AGO"`) and mobile navigation buttons cleanly fade out (`opacity-0 pointer-events-none`) when an era sheet opens, eliminating all visual overlap and text bleeding.
